@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.book_formats import get_handler, BookStructure, BookSegment
 from src.pipeline import TranslationPipeline
 
 
@@ -137,6 +138,26 @@ class BookTranslator:
                 ensure_ascii=False,
                 indent=2,
             )
+
+    # ------------------------------------------------------------------
+    # Book format parsing
+    # ------------------------------------------------------------------
+    def parse_book(self, file_path: str) -> BookStructure:
+        """Parse a book file using the appropriate format handler."""
+        handler = get_handler(file_path)
+        return handler.parse(file_path)
+
+    def reconstruct_book(
+        self,
+        structure: BookStructure,
+        translations: Dict[str, str],
+        output_path: str,
+    ) -> None:
+        """Reconstruct a book with translated segments."""
+        handler = get_handler(structure.format and structure.title or output_path)
+        # Use output_path extension to determine handler
+        handler = get_handler(output_path)
+        handler.reconstruct(structure, translations, output_path)
 
     # ------------------------------------------------------------------
     # Consistency

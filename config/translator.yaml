@@ -57,6 +57,34 @@ glossary:
   path: "data/glossary.tbx"
   injection_stages: ["analysis", "translate", "postedit", "review", "judge"]
 
+dictionaries:
+  data_dir: "data/dictionaries"
+  cache_dir: "data/cache"
+  wordnet_enabled: true
+  wiktionary_enabled: true
+  roget_enabled: true
+  datamuse_enabled: true
+  merriam_webster_key: null
+  collins_key: null
+  oxford_app_id: null
+  oxford_app_key: null
+
+llm:
+  enabled: false
+  provider: "openai"
+  model: null
+  api_key: null
+  temperature: 0.3
+  max_tokens: 2000
+
+book:
+  format_support: ["txt", "md", "epub", "docx", "pdf"]
+  consistency_tracking: true
+  character_registry: "data/characters.json"
+  places_registry: "data/places.json"
+  manifest: "data/manifest.json"
+  output_dir: "outputs"
+
 book:
   format_support: ["pdf", "docx", "epub", "md", "txt"]
   consistency_tracking: true

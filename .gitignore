@@ -55,3 +55,8 @@ outputs/*.pdf
 
 # Glossary data (JSON output from tool)
 data/glossary.json
+
+# Dictionary cache
+data/cache/
+data/**/cache.db
+data/**/*.db
