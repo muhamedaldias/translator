@@ -1,0 +1,28 @@
+{
+  "places": [
+    {
+      "name": "New York",
+      "arabic_name": "نيويورك",
+      "place_type": "city",
+      "description": "Major city in the United States"
+    },
+    {
+      "name": "Cairo",
+      "arabic_name": "القاهرة",
+      "place_type": "city",
+      "description": "Capital of Egypt"
+    },
+    {
+      "name": "London",
+      "arabic_name": "لندن",
+      "place_type": "city",
+      "description": "Capital of the United Kingdom"
+    },
+    {
+      "name": "United Nations",
+      "arabic_name": "الأمم المتحدة",
+      "place_type": "org",
+      "description": "International organization"
+    }
+  ]
+}

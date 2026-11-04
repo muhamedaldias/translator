@@ -1,0 +1,34 @@
+{
+  "characters": [
+    {
+      "name": "John Smith",
+      "aliases": ["John", "Johnny"],
+      "arabic_name": "جون سميث",
+      "arabic_aliases": ["جون", "جوني"],
+      "pronouns": "he",
+      "title": "Mr.",
+      "first_chapter": 1,
+      "description": "Main protagonist, American engineer"
+    },
+    {
+      "name": "Sarah Johnson",
+      "aliases": ["Sarah", "Sally"],
+      "arabic_name": "سارة جونسون",
+      "arabic_aliases": ["سارة", "سالي"],
+      "pronouns": "she",
+      "title": "Ms.",
+      "first_chapter": 1,
+      "description": "Co-protagonist, Arabic language professor"
+    },
+    {
+      "name": "Ahmed Al-Mansouri",
+      "aliases": ["Ahmed"],
+      "arabic_name": "أحمد المنصوري",
+      "arabic_aliases": ["أحمد"],
+      "pronouns": "he",
+      "title": "Dr.",
+      "first_chapter": 2,
+      "description": "Local guide in Cairo"
+    }
+  ]
+}

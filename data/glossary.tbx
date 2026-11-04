@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tbx PUBLIC "-//TALB//DTD TBX 2.0//EN" "tbx20.dtd">
+
+<tbx version="2.0" lang="en">
+  <description>Multi-Agent Translation System — EN↔AR Glossary</description>
+  <created>2026-11-04</created>
+  <modified>2026-11-04</modified>
+
+  <termEntry id="1">
+    <langSec lang="en">
+      <term>computer</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>حاسوب</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="2">
+    <langSec lang="en">
+      <term>software</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>برمجيات</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="3">
+    <langSec lang="en">
+      <term>application</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>تطبيق</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="4">
+    <langSec lang="en">
+      <term>interface</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>واجهة</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="5">
+    <langSec lang="en">
+      <term>API</term>
+      <termType>acronym</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>واجهة برمجة التطبيقات</term>
+      <termType>acronym</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="6">
+    <langSec lang="en">
+      <term>database</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>قاعدة بيانات</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="7">
+    <langSec lang="en">
+      <term>server</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>خادم</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="8">
+    <langSec lang="en">
+      <term>client</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>عميل</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">technology</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="9">
+    <langSec lang="en">
+      <term>function</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">programming</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>دالة</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">programming</descrip>
+    </langSec>
+  </termEntry>
+
+  <termEntry id="10">
+    <langSec lang="en">
+      <term>variable</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">programming</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>متغير</term>
+      <termType>commonNoun</termType>
+      <descrip type="subjectField">programming</descrip>
+    </langSec>
+  </termEntry>
+
+</tbx>

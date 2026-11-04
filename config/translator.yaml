@@ -1,0 +1,65 @@
+# Translator System Configuration
+
+project:
+  name: "Multi-Agent Translation System EN↔AR"
+  version: "1.0.0"
+  source_lang: "en"
+  target_lang: "ar"
+  default_register: "MSA"
+  supported_registers: ["MSA", "EGY", "GULF", "LEV"]
+
+pipeline:
+  max_iterations: 3
+  quality_threshold: 85
+  sequential: true
+  glossary_injection: true
+
+arabic:
+  diacritics_policy: "remove"  # retain | remove | optional
+  orthography_normalization: true
+  plural_forms: ["zero", "one", "two", "few", "many", "other"]
+  gender_agreement: true
+  rtl_preservation: true
+  code_block_protection: true
+
+skills:
+  en_lexicon:
+    source: "open_english_wordnet_2025"
+    format: "json"
+    offline: true
+  en_ar_bilingual:
+    source: "wiktionary_dump"
+    format: "xml"
+    offline: true
+  synonym_expansion:
+    source: "roget_1911"
+    format: "text"
+    offline: true
+  style_reference:
+    sources:
+      - "unesco_style_manual_2004"
+      - "ausit_arabic_style_guide"
+      - "mozilla_arabic_style_guide"
+    offline: true
+  datamuse_synonyms:
+    api_url: "https://api.datamuse.com/words"
+    offline: false
+    cache_enabled: true
+
+evaluation:
+  primary_metric: "COMET-MQM"
+  secondary_metrics: ["chrF", "AL-BLEU"]
+  tsr_threshold: 0.95
+  human_eval: ["MQM", "DA", "MHP"]
+
+glossary:
+  format: "tbx"
+  path: "data/glossary.tbx"
+  injection_stages: ["analysis", "translate", "postedit", "review", "judge"]
+
+book:
+  format_support: ["pdf", "docx", "epub", "md", "txt"]
+  consistency_tracking: true
+  character_registry: "data/characters.json"
+  places_registry: "data/places.json"
+  manifest: "data/manifest.json"
