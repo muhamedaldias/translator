@@ -55,7 +55,7 @@ class ArabicProcessor:
         return bool(self.ARABIC_RANGE.search(text))
 
     def contains_arabic(self, text: str) -> bool:
-        """Alias for is_arabic."""
+        """Alias for is_arabic (kept for backward compatibility)."""
         return self.is_arabic(text)
 
     def detect_register(self, text: str) -> str:

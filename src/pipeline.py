@@ -229,8 +229,8 @@ class TranslationPipeline:
             result.domain = domain_hint
 
         # Extract code blocks (preserve unchanged)
-        code_pattern = r"`[^`]+`|<[^>]+>|\{\{[^}]+\}\}|\$\{[^}]+\}"
-        result.code_blocks = re.findall(code_pattern, source_text)
+        protected, code_blocks = self.arabic.protect_code_blocks(source_text)
+        result.code_blocks = code_blocks
 
         # Difficult terms (use dictionary + heuristics)
         difficult_terms = set()
@@ -306,7 +306,7 @@ class TranslationPipeline:
         # Clean up placeholder markers if present
         if draft.startswith("[LLM"):
             # Apply glossary substitutions manually for placeholder mode
-            draft = self._apply_glossary_substitutions(source_text, glossary_terms)
+            draft = self._apply_glossary_substitutions(source_text, glossary_terms, analysis)
 
         result.draft_translation = draft
         result.word_count = analysis.word_count
@@ -398,16 +398,29 @@ class TranslationPipeline:
         return "\n".join(lines)
 
     def _apply_glossary_substitutions(
-        self, source_text: str, glossary_terms: List[Dict[str, Any]]
+        self, source_text: str, glossary_terms: List[Dict[str, Any]], analysis: AnalysisResult
     ) -> str:
-        """Apply glossary term substitutions (placeholder mode fallback)."""
-        draft = source_text
+        """Apply glossary term substitutions (placeholder mode fallback).
+
+        Protects code blocks before substitution and restores them after,
+        so glossary terms inside code blocks (e.g. XML tags, IDs) are not mangled.
+        """
+        # Extract and protect code blocks
+        protected, blocks = self.arabic.protect_code_blocks(source_text)
+
+        # Apply glossary substitutions to protected text only
+        draft = protected
         for term in glossary_terms:
             en = term.get("en", term.get("source", ""))
             ar = term.get("ar", term.get("target", ""))
             if en and ar:
                 draft = draft.replace(en, ar)
-        return f"[ترجمة مسودة مسجل: {analysis.register if hasattr(self, '_last_analysis') else 'MSA'}] {draft}"
+
+        # Restore code blocks
+        for block in blocks:
+            draft = draft.replace("___CODE_BLOCK___", block, 1)
+
+        return f"[ترجمة مسودة مسجل: {analysis.register}] {draft}"
 
     # ------------------------------------------------------------------
     # Stage 3: Post-Edit
@@ -426,7 +439,7 @@ class TranslationPipeline:
 
         corrections = []
 
-        # Gender agreement check
+        # Gender agreement check (placeholder — requires LLM analysis of the draft)
         if analysis.gender_context.get("subject_gender") != "neutral":
             corrections.append({
                 "position": 0,
@@ -439,10 +452,16 @@ class TranslationPipeline:
         if self.arabic.orthography_normalization:
             normalized = self.arabic.normalize_orthography(draft)
             if normalized != draft:
+                # Find first position where text differs
+                pos = 0
+                for c1, c2 in zip(draft, normalized):
+                    if c1 != c2:
+                        break
+                    pos += 1
                 corrections.append({
-                    "position": 0,
-                    "original": draft[:20],
-                    "corrected": normalized[:20],
+                    "position": pos,
+                    "original": draft[pos:pos + 20],
+                    "corrected": normalized[pos:pos + 20],
                     "reason": "orthography",
                 })
                 result.revised_translation = normalized
@@ -451,10 +470,16 @@ class TranslationPipeline:
         if self.arabic.diacritics_policy == "remove":
             stripped = self.arabic.remove_diacritics(draft)
             if stripped != draft:
+                # Find first position containing a diacritic
+                pos = 0
+                for ch in stripped:
+                    if self.arabic.DIACRITICS.search(ch):
+                        break
+                    pos += 1
                 corrections.append({
-                    "position": 0,
-                    "original": draft[:20],
-                    "corrected": stripped[:20],
+                    "position": pos,
+                    "original": draft[pos:pos + 20],
+                    "corrected": stripped[pos:pos + 20],
                     "reason": "diacritics",
                 })
                 result.revised_translation = stripped
