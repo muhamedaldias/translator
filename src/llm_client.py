@@ -12,9 +12,9 @@ import json
 import os
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, ClassVar
+from urllib.parse import urlsplit
 
 
 @dataclass
@@ -32,7 +32,7 @@ class LLMResponse:
 class LLMClient(ABC):
     """Abstract base class for LLM providers."""
 
-    def __init__(self, model: str, api_key: Optional[str] = None, **kwargs):
+    def __init__(self, model: str, api_key: str | None = None, **kwargs):
         self.model = model
         self.api_key = api_key
         self.kwargs = kwargs
@@ -40,7 +40,7 @@ class LLMClient(ABC):
     @abstractmethod
     def complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.3,
         max_tokens: int = 2000,
         **kwargs,
@@ -60,8 +60,8 @@ class OpenAIClient(LLMClient):
     def __init__(
         self,
         model: str = "gpt-4o",
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(model, api_key, **kwargs)
@@ -78,6 +78,8 @@ class OpenAIClient(LLMClient):
                 self._client = OpenAI(
                     api_key=self.api_key,
                     base_url=self.base_url,
+                    timeout=self.kwargs.get("timeout", 60.0),
+                    max_retries=self.kwargs.get("max_retries", 2),
                 )
             except ImportError:
                 raise ImportError(
@@ -91,7 +93,7 @@ class OpenAIClient(LLMClient):
 
     def complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.3,
         max_tokens: int = 2000,
         **kwargs,
@@ -127,7 +129,7 @@ class AnthropicClient(LLMClient):
     def __init__(
         self,
         model: str = "claude-3-5-sonnet-20241022",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(model, api_key, **kwargs)
@@ -140,7 +142,11 @@ class AnthropicClient(LLMClient):
             try:
                 import anthropic  # type: ignore
 
-                self._client = anthropic.Anthropic(api_key=self.api_key)
+                self._client = anthropic.Anthropic(
+                    api_key=self.api_key,
+                    timeout=self.kwargs.get("timeout", 60.0),
+                    max_retries=self.kwargs.get("max_retries", 2),
+                )
             except ImportError:
                 raise ImportError(
                     "anthropic package not installed. Run: pip install anthropic"
@@ -153,7 +159,7 @@ class AnthropicClient(LLMClient):
 
     def complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.3,
         max_tokens: int = 2000,
         **kwargs,
@@ -206,7 +212,7 @@ class LocalClient(LLMClient):
     def __init__(
         self,
         model: str = "llama3.1",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         base_url: str = "http://localhost:11434/v1",
         **kwargs,
     ) -> None:
@@ -223,6 +229,8 @@ class LocalClient(LLMClient):
                 self._client = OpenAI(
                     api_key=self.api_key or "local",
                     base_url=self.base_url,
+                    timeout=self.kwargs.get("timeout", 120.0),
+                    max_retries=self.kwargs.get("max_retries", 1),
                 )
             except ImportError:
                 raise ImportError(
@@ -230,24 +238,28 @@ class LocalClient(LLMClient):
                 )
         return self._client
 
+    def _parse_host_port(self) -> tuple[str, int]:
+        """Parse host and port from base_url (scheme-default ports honored)."""
+        parts = urlsplit(self.base_url)
+        host = parts.hostname or "localhost"
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        return host, port
+
     def is_available(self) -> bool:
         """Check if local server is reachable."""
         import socket
 
         try:
-            host = self.base_url.split("//")[1].split(":")[0]
-            port = int(self.base_url.split(":")[-1].split("/")[0])
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            return result == 0
+            host, port = self._parse_host_port()
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(2)
+                return sock.connect_ex((host, port)) == 0
         except Exception:
             return False
 
     def complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.3,
         max_tokens: int = 2000,
         **kwargs,
@@ -280,7 +292,7 @@ class LocalClient(LLMClient):
 class LLMManager:
     """Manages LLM client selection and fallback."""
 
-    PROVIDERS = {
+    PROVIDERS: ClassVar[dict[str, type]] = {
         "openai": OpenAIClient,
         "anthropic": AnthropicClient,
         "local": LocalClient,
@@ -289,10 +301,10 @@ class LLMManager:
     def __init__(
         self,
         provider: str = "openai",
-        model: Optional[str] = None,
-        api_key: Optional[str] = None,
-        fallback_provider: Optional[str] = None,
-        fallback_model: Optional[str] = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        fallback_provider: str | None = None,
+        fallback_model: str | None = None,
         **kwargs,
     ) -> None:
         self.provider = provider
@@ -325,7 +337,7 @@ class LLMManager:
         self,
         provider: str,
         model: str,
-        api_key: Optional[str],
+        api_key: str | None,
         **kwargs,
     ) -> LLMClient:
         """Create an LLM client instance."""
@@ -336,14 +348,14 @@ class LLMManager:
 
     def complete(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.3,
         max_tokens: int = 2000,
         use_fallback: bool = True,
         **kwargs,
     ) -> LLMResponse:
         """Generate completion with optional fallback."""
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         # Try primary provider
         if self.primary and self.primary.is_available():
@@ -372,7 +384,7 @@ class LLMManager:
             f"({self.fallback_provider}) are not configured or not reachable."
         )
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get status of all configured providers."""
         return {
             "primary": {
@@ -392,8 +404,8 @@ class LLMManager:
 
 def create_llm_manager(
     provider: str = "openai",
-    model: Optional[str] = None,
-    api_key: Optional[str] = None,
+    model: str | None = None,
+    api_key: str | None = None,
     **kwargs,
 ) -> LLMManager:
     """Factory function to create an LLMManager."""

@@ -9,21 +9,41 @@ consistent terminology enforcement across translation stages.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
-import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+
+# Escaping only, no parsing (B406 justification)
+from xml.sax.saxutils import escape  # nosec B406
+
+logger = logging.getLogger(__name__)
+
+# Prefer defusedxml (entity-expansion DoS protection); fall back to stdlib
+# ElementTree, which on Python >= 3.13 blocks classic billion-laughs but not
+# all low-amplification memory attacks. Neither fetches external entities.
+try:
+    from defusedxml.ElementTree import parse as _xml_parse  # type: ignore
+except ImportError:  # pragma: no cover
+    # Fallback only; defusedxml is preferred when installed (B405 justification)
+    from xml.etree.ElementTree import parse as _xml_parse  # type: ignore # nosec B405
+
+_MAX_GLOSSARY_BYTES = 50 * 1024 * 1024  # 50 MB hard cap on term-base files
+
+
+def _local_name(tag: str) -> str:
+    """Strip any XML namespace from a tag name."""
+    return tag.rsplit("}", 1)[-1]
 
 
 class Glossary:
     """Term base for consistent translation terminology."""
 
-    def __init__(self, path: Optional[str] = None) -> None:
+    def __init__(self, path: str | None = None) -> None:
         self.path = path
-        self.terms: List[Dict[str, str]] = []
-        self.terms_by_source: Dict[str, Dict[str, str]] = {}
-        self.terms_by_target: Dict[str, Dict[str, str]] = {}
+        self.terms: list[dict[str, str]] = []
+        self.terms_by_source: dict[str, dict[str, str]] = {}
+        self.terms_by_target: dict[str, dict[str, str]] = {}
 
         if path and os.path.exists(path):
             self.load(path)
@@ -32,8 +52,14 @@ class Glossary:
     # Loading
     # ------------------------------------------------------------------
     def load(self, path: str) -> None:
-        """Load glossary from TBX or UTX file."""
+        """Load glossary from TBX, UTX or JSON file (replaces current terms)."""
         self.path = path
+        self.terms = []  # reset: reloading must not duplicate terms
+        size = os.path.getsize(path)
+        if size > _MAX_GLOSSARY_BYTES:
+            raise ValueError(
+                f"Glossary file too large ({size} bytes > {_MAX_GLOSSARY_BYTES}): {path}"
+            )
         ext = Path(path).suffix.lower()
 
         if ext == ".tbx":
@@ -48,23 +74,23 @@ class Glossary:
         self._build_indexes()
 
     def _load_tbx(self, path: str) -> None:
-        """Load TBX (TermBase eXchange, ISO 30042) file."""
-        tree = ET.parse(path)
-        root = tree.getroot()
+        """Load TBX (TermBase eXchange, ISO 30042), namespace-agnostic."""
+        # defusedxml when available + 50MB size cap above (B314 justification)
+        root = _xml_parse(path).getroot()  # nosec B314
+        if root is None:
+            raise ValueError(f"Empty glossary XML file: {path}")
 
-        # TBX namespace handling
-        ns = {"tbx": "http://www.tbx.net"}
-
-        for term_entry in root.findall(".//termEntry"):
-            term_data: Dict[str, str] = {}
-
-            # Get language sections
-            for lang_sec in term_entry.findall("langSec"):
-                lang = lang_sec.get("lang", "en")
-                for term_el in lang_sec.findall("term"):
-                    term_text = term_el.text or ""
-                    term_data[lang] = term_text
-
+        for entry in root.iter():
+            if _local_name(entry.tag) != "termEntry":
+                continue
+            term_data: dict[str, str] = {}
+            for child in entry:
+                if _local_name(child.tag) != "langSec":
+                    continue
+                lang = child.get("lang", "en")
+                for term_el in child:
+                    if _local_name(term_el.tag) == "term":
+                        term_data[lang] = term_el.text or ""
             if "en" in term_data or "ar" in term_data:
                 self.terms.append(term_data)
 
@@ -77,10 +103,7 @@ class Glossary:
                     continue
                 parts = line.split("\t")
                 if len(parts) >= 2:
-                    self.terms.append({
-                        "en": parts[0],
-                        "ar": parts[1],
-                    })
+                    self.terms.append({"en": parts[0], "ar": parts[1]})
 
     def _load_json(self, path: str) -> None:
         """Load glossary from JSON file."""
@@ -88,19 +111,17 @@ class Glossary:
             data = json.load(f)
 
         if isinstance(data, list):
-            self.terms = data
+            self.terms = [t for t in data if isinstance(t, dict)]
         elif isinstance(data, dict) and "terms" in data:
-            self.terms = data["terms"]
+            self.terms = [t for t in data["terms"] if isinstance(t, dict)]
 
     def _build_indexes(self) -> None:
         """Build lookup indexes for fast term retrieval."""
         self.terms_by_source = {}
         self.terms_by_target = {}
-
         for term in self.terms:
             source = term.get("en", term.get("source", ""))
-            target = term.get("ar", term.get("target", term.get("ar", "")))
-
+            target = term.get("ar", term.get("target", ""))
             if source:
                 self.terms_by_source[source.lower()] = term
             if target:
@@ -109,14 +130,14 @@ class Glossary:
     # ------------------------------------------------------------------
     # Query
     # ------------------------------------------------------------------
-    def get(self, source_term: str, target_lang: str = "ar") -> Optional[str]:
+    def get(self, source_term: str, target_lang: str = "ar") -> str | None:
         """Get translation for a source term."""
         term = self.terms_by_source.get(source_term.lower())
         if term:
             return term.get(target_lang, term.get("ar", ""))
         return None
 
-    def get_reverse(self, target_term: str, source_lang: str = "en") -> Optional[str]:
+    def get_reverse(self, target_term: str, source_lang: str = "en") -> str | None:
         """Get source term for a target translation."""
         term = self.terms_by_target.get(target_term.lower())
         if term:
@@ -126,53 +147,108 @@ class Glossary:
     def get_relevant_terms(
         self,
         text: str,
-        domain: Optional[str] = None,
-    ) -> List[Dict[str, str]]:
-        """Get glossary terms relevant to the given text."""
-        relevant: List[Dict[str, str]] = []
+        domain: str | None = None,
+    ) -> list[dict[str, str]]:
+        """Glossary terms appearing in text as whole words (case-insensitive).
 
+        Word-boundary matching prevents false positives like 'API' inside
+        'CAPITAL' or 'function' inside 'malfunction'.
+        """
+        relevant: list[dict[str, str]] = []
         for term in self.terms:
             source = term.get("en", term.get("source", ""))
-            if source and source.lower() in text.lower():
+            if not source:
+                continue
+            if domain and term.get("domain") and term["domain"] != domain:
+                continue
+            if re.search(r"\b" + re.escape(source) + r"\b", text, re.IGNORECASE):
                 relevant.append(term)
-
         return relevant
 
     # ------------------------------------------------------------------
     # Adherence Check
     # ------------------------------------------------------------------
-    def check_adherence(self, translation: str) -> float:
-        """Check glossary adherence: % of terms correctly used in translation."""
-        if not self.terms:
+    def check_adherence(
+        self, translation: str, source_text: str | None = None
+    ) -> float:
+        """Glossary adherence: % of expected terms correctly used.
+
+        When source_text is given, only terms relevant to that source are
+        scored (a perfect translation of a 1-term sentence scores 100, not
+        1/N of the whole glossary). Without source_text, all terms are
+        scored (legacy behavior).
+        """
+        terms = self.get_relevant_terms(source_text) if source_text is not None else self.terms
+        if not terms:
             return 100.0
 
         found = 0
-        for term in self.terms:
+        for term in terms:
             target = term.get("ar", term.get("target", ""))
             if target and target in translation:
                 found += 1
-
-        return (found / len(self.terms)) * 100
+        return (found / len(terms)) * 100
 
     # ------------------------------------------------------------------
     # Add / Update
     # ------------------------------------------------------------------
-    def add_term(self, source: str, target: str, domain: Optional[str] = None) -> None:
+    def add_term(self, source: str, target: str, domain: str | None = None) -> None:
         """Add a new term to the glossary."""
-        term: Dict[str, str] = {"en": source, "ar": target}
+        term: dict[str, str] = {"en": source, "ar": target}
         if domain:
             term["domain"] = domain
-
         self.terms.append(term)
         self._build_indexes()
 
-    def save(self, path: Optional[str] = None) -> None:
-        """Save glossary to JSON file."""
-        save_path = path or self.path or str(
+    def save(self, path: str | None = None) -> None:
+        """Save glossary, preserving the format implied by the extension.
+
+        .tbx -> TBX XML, .utx -> UTX, anything else -> JSON.
+        Writing JSON over a .tbx path would corrupt the term base.
+        """
+        save_path = Path(path or self.path or str(
             Path(__file__).resolve().parent.parent / "data" / "glossary.json"
-        )
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(self.terms, f, ensure_ascii=False, indent=2)
+        ))
+        ext = save_path.suffix.lower()
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        if ext == ".tbx":
+            content = self._to_tbx()
+        elif ext == ".utx":
+            content = self._to_utx()
+        else:
+            content = json.dumps(self.terms, ensure_ascii=False, indent=2)
+        # Atomic write: never leave a half-written term base behind
+        tmp = save_path.with_suffix(save_path.suffix + ".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(save_path)
+
+    def _to_tbx(self) -> str:
+        """Serialize terms as minimal TBX v2 XML."""
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<tbx version="2.0" lang="en">',
+        ]
+        for i, term in enumerate(self.terms, 1):
+            lines.append(f'  <termEntry id="{i}">')
+            for lang in ("en", "ar"):
+                value = term.get(lang, "")
+                if value:
+                    lines.append(f'    <langSec lang="{lang}">')
+                    lines.append(f"      <term>{escape(value)}</term>")
+                    lines.append("    </langSec>")
+            lines.append("  </termEntry>")
+        lines.append("</tbx>")
+        return "\n".join(lines) + "\n"
+
+    def _to_utx(self) -> str:
+        """Serialize terms as UTX tab-delimited."""
+        lines = ["# UTX glossary (en\tar)"]
+        for term in self.terms:
+            en = term.get("en", term.get("source", ""))
+            ar = term.get("ar", term.get("target", ""))
+            if en and ar:
+                lines.append(f"{en}\t{ar}")
+        return "\n".join(lines) + "\n"
 
     def __len__(self) -> int:
         return len(self.terms)
@@ -192,7 +268,6 @@ def main() -> None:
     parser.add_argument("--add", nargs=2, metavar=("SOURCE", "TARGET"), help="Add a term")
 
     args = parser.parse_args()
-
     glossary = Glossary()
 
     if args.load:

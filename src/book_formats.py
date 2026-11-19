@@ -15,12 +15,15 @@ and reconstructs the file with translated content.
 
 from __future__ import annotations
 
-import os
+import html
+import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -31,7 +34,7 @@ class BookSegment:
     segment_type: str = "paragraph"  # paragraph, heading, code_block, title, etc.
     chapter: int = 0
     position: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -40,8 +43,8 @@ class BookStructure:
     title: str = ""
     author: str = ""
     language: str = "en"
-    chapters: List[Dict[str, Any]] = field(default_factory=list)
-    segments: List[BookSegment] = field(default_factory=list)
+    chapters: list[dict[str, Any]] = field(default_factory=list)
+    segments: list[BookSegment] = field(default_factory=list)
     total_words: int = 0
     format: str = "txt"
 
@@ -63,7 +66,7 @@ class BookFormatHandler(ABC):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
     ) -> None:
         """Reconstruct the book with translated segments."""
@@ -91,20 +94,27 @@ class TextHandler(BookFormatHandler):
 
         segment_id = 0
         chapter = 1
+        seen_content = False
 
         for para in paragraphs:
-            para = para.strip()
-            if not para:
+            stripped = para.strip()
+            if not stripped:
                 continue
 
-            # Detect chapter headings
-            if re.match(r"^(#{1,6}\s|CHAPTER|Chapter|الفصل|الفصل\s+\d+)", para, re.IGNORECASE):
-                segment_type = "heading"
-                chapter += 1
-            elif para.startswith("    ") or para.startswith("\t"):
+            # Detect fenced/indented code BEFORE stripping indentation
+            if (
+                stripped.startswith(("```", "~~~"))
+                or para.startswith(("    ", "\t"))
+            ):
                 segment_type = "code_block"
+            elif re.match(r"^(#{1,6}\s|CHAPTER|Chapter|الفصل|الفصل\s+\d+)", stripped, re.IGNORECASE):
+                segment_type = "heading"
+                if seen_content:
+                    chapter += 1
             else:
                 segment_type = "paragraph"
+            seen_content = True
+            para = stripped
 
             segment = BookSegment(
                 id=f"seg_{segment_id}",
@@ -122,7 +132,7 @@ class TextHandler(BookFormatHandler):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
     ) -> None:
         """Reconstruct text file with translated segments."""
@@ -147,8 +157,8 @@ class EPUBHandler(BookFormatHandler):
         """Parse EPUB file into segments."""
         try:
             import ebooklib  # type: ignore
-            from ebooklib import epub  # type: ignore
             from bs4 import BeautifulSoup  # type: ignore
+            from ebooklib import epub  # type: ignore
         except ImportError:
             raise ImportError(
                 "EPUB support requires: pip install ebooklib beautifulsoup4"
@@ -172,11 +182,17 @@ class EPUBHandler(BookFormatHandler):
             if not structure.title and soup.title:
                 structure.title = soup.title.get_text()
 
-            # Get text content
-            text = soup.get_text("\n", strip=True)
-
-            # Split into paragraphs
-            paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+            # Extract BLOCK-level elements so inline tags (<em>, <code>)
+            # do not fragment sentences into separate segments
+            blocks = soup.find_all(
+                ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote"]
+            )
+            if blocks:
+                paragraphs = [b.get_text(" ", strip=True) for b in blocks]
+            else:
+                text = soup.get_text("\n", strip=True)
+                paragraphs = [p.strip() for p in text.split("\n")]
+            paragraphs = [p for p in paragraphs if p]
 
             for para in paragraphs:
                 segment = BookSegment(
@@ -197,14 +213,12 @@ class EPUBHandler(BookFormatHandler):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
     ) -> None:
         """Reconstruct EPUB with translated segments."""
         try:
-            import ebooklib  # type: ignore
             from ebooklib import epub  # type: ignore
-            from bs4 import BeautifulSoup  # type: ignore
         except ImportError:
             raise ImportError(
                 "EPUB support requires: pip install ebooklib beautifulsoup4"
@@ -213,10 +227,10 @@ class EPUBHandler(BookFormatHandler):
         # For simplicity, create a new EPUB with translated text
         book = epub.EpubBook()
         book.set_title(structure.title)
-        book.set_language("ar")
+        book.set_language(structure.language or "ar")
 
         # Group segments by chapter
-        chapters: Dict[int, List[BookSegment]] = {}
+        chapters: dict[int, list[BookSegment]] = {}
         for seg in structure.segments:
             chapters.setdefault(seg.chapter, []).append(seg)
 
@@ -224,13 +238,14 @@ class EPUBHandler(BookFormatHandler):
             chapter = epub.EpubHtml(
                 title=f"Chapter {chap_num}",
                 file_name=f"chap_{chap_num}.xhtml",
-                lang="ar",
+                lang=structure.language or "ar",
             )
 
             translated_paras = []
             for seg in segs:
                 translated = translations.get(seg.id, seg.text)
-                translated_paras.append(f"<p>{translated}</p>")
+                # Escape: translation text must never inject markup into the EPUB
+                translated_paras.append(f"<p>{html.escape(translated)}</p>")
 
             chapter.content = (
                 "<html><head><meta charset='utf-8'/></head>"
@@ -283,7 +298,8 @@ class DOCXHandler(BookFormatHandler):
                 continue
 
             # Detect headings
-            if para.style.name.startswith("Heading"):
+            style_name = para.style.name if para.style is not None else "Normal"
+            if style_name.startswith("Heading"):
                 segment_type = "heading"
                 chapter += 1
             else:
@@ -295,7 +311,7 @@ class DOCXHandler(BookFormatHandler):
                 segment_type=segment_type,
                 chapter=chapter,
                 position=segment_id,
-                metadata={"style": para.style.name},
+                metadata={"style": style_name},
             )
             structure.segments.append(segment)
             structure.total_words += len(text.split())
@@ -306,13 +322,12 @@ class DOCXHandler(BookFormatHandler):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
     ) -> None:
         """Reconstruct DOCX with translated segments."""
         try:
             from docx import Document  # type: ignore
-            from docx.shared import Pt  # type: ignore
         except ImportError:
             raise ImportError(
                 "DOCX support requires: pip install python-docx"
@@ -321,7 +336,7 @@ class DOCXHandler(BookFormatHandler):
         doc = Document()
 
         # Set title
-        title = doc.add_heading(structure.title, level=0)
+        doc.add_heading(structure.title, level=0)
 
         for seg in structure.segments:
             translated = translations.get(seg.id, seg.text)
@@ -350,11 +365,14 @@ class PDFHandler(BookFormatHandler):
     def parse(self, file_path: str) -> BookStructure:
         """Parse PDF file into segments."""
         try:
-            import PyPDF2  # type: ignore
+            import pypdf as PyPDF2  # type: ignore
         except ImportError:
-            raise ImportError(
-                "PDF support requires: pip install PyPDF2"
-            )
+            try:
+                import PyPDF2  # type: ignore
+            except ImportError:
+                raise ImportError(
+                    "PDF support requires: pip install pypdf"
+                )
 
         structure = BookStructure(
             title=Path(file_path).stem,
@@ -394,11 +412,21 @@ class PDFHandler(BookFormatHandler):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
     ) -> None:
-        """Reconstruct PDF with translated segments (text-only output)."""
-        # PDF reconstruction is complex; output as text for now
+        """Reconstruct PDF with translated segments (text-only output).
+
+        Real PDF typesetting is not implemented; writing plain text to a
+        .pdf path would produce a corrupt 'PDF', so text goes to a .txt
+        sibling instead.
+        """
+        out = Path(output_path)
+        if out.suffix.lower() == ".pdf":
+            out = out.with_suffix(".txt")
+            logger.warning(
+                "PDF reconstruction is text-only; writing %s instead of a fake .pdf", out
+            )
         output_lines = []
         current_chapter = 0
 
@@ -410,14 +438,14 @@ class PDFHandler(BookFormatHandler):
             output_lines.append(translated)
             output_lines.append("")
 
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(output_path).write_text("\n".join(output_lines), encoding="utf-8")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("\n".join(output_lines), encoding="utf-8")
 
 
 # ------------------------------------------------------------------
 # Handler registry
 # ------------------------------------------------------------------
-HANDLERS: List[BookFormatHandler] = [
+HANDLERS: list[BookFormatHandler] = [
     TextHandler(),
     EPUBHandler(),
     DOCXHandler(),
@@ -435,12 +463,8 @@ def get_handler(file_path: str) -> BookFormatHandler:
     )
 
 
-def list_supported_formats() -> List[str]:
+def list_supported_formats() -> list[str]:
     """List all supported file formats."""
-    formats = []
-    for handler in HANDLERS:
-        # This is a simplification; in practice we'd check extensions
-        pass
     return [".txt", ".md", ".epub", ".docx", ".pdf"]
 
 
@@ -462,6 +486,6 @@ if __name__ == "__main__":
         print(f"Format: {structure.format}")
         print(f"Segments: {len(structure.segments)}")
         print(f"Total words: {structure.total_words}")
-        print(f"\nFirst 3 segments:")
+        print("\nFirst 3 segments:")
         for seg in structure.segments[:3]:
             print(f"  [{seg.id}] {seg.segment_type} (ch{seg.chapter}): {seg.text[:80]}")

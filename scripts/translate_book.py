@@ -24,10 +24,11 @@ def main() -> None:
     parser.add_argument("--target", default="ar", help="Target language (default: ar)")
     parser.add_argument("--output", help="Output directory for translated chapters")
     parser.add_argument("--format", default="txt", help="Book format: txt, epub, pdf, docx, md")
+    parser.add_argument("--project-root", help="Project root for registries/manifest (default: repository root)")
 
     args = parser.parse_args()
 
-    translator = BookTranslator(target_lang=args.target)
+    translator = BookTranslator(project_root=args.project_root, target_lang=args.target)
 
     input_path = Path(args.input)
     if input_path.is_dir():
@@ -40,7 +41,7 @@ def main() -> None:
 
     results = translator.translate_book(chapters, output_dir=args.output)
 
-    print(f"\n=== Book Translation Complete ===")
+    print("\n=== Book Translation Complete ===")
     print(f"Chapters: {len(results)}")
     for r in results:
         status = "APPROVED" if r["approved"] else "NEEDS REVIEW"

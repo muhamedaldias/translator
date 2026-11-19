@@ -11,15 +11,19 @@ Implements automatic evaluation metrics:
 
 from __future__ import annotations
 
+import logging
 import math
-import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_COMET_MODEL: Any = None  # lazy singleton: load the checkpoint once, not per call
 
 try:
     import nltk  # type: ignore
-    from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+    from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
 except Exception:  # pragma: no cover
     nltk = None  # type: ignore
 
@@ -41,29 +45,54 @@ class TranslationEvaluator:
         word_order: int = 2,
         beta: float = 3.0,
     ) -> float:
-        """Compute chrF score between reference and hypothesis."""
-        ref_chars = self._char_ngrams(reference, char_order)
-        hyp_chars = self._char_ngrams(hypothesis, char_order)
+        """Compute chrF/chrF+ score (character + optional word n-gram F-score).
 
-        if not ref_chars or not hyp_chars:
+        Averages F_beta over character orders 1..char_order and, when
+        word_order > 0, word orders 1..word_order (chrF+ behavior).
+        """
+        f_scores: list[float] = []
+        for order in range(1, char_order + 1):
+            f = self._ngram_fscore(
+                self._char_ngrams(reference, order),
+                self._char_ngrams(hypothesis, order),
+                beta,
+            )
+            if f is not None:
+                f_scores.append(f)
+        if word_order > 0:
+            ref_words = reference.split()
+            hyp_words = hypothesis.split()
+            for order in range(1, word_order + 1):
+                f = self._ngram_fscore(
+                    self._token_ngrams(ref_words, order),
+                    self._token_ngrams(hyp_words, order),
+                    beta,
+                )
+                if f is not None:
+                    f_scores.append(f)
+        if not f_scores:
             return 0.0
+        return (sum(f_scores) / len(f_scores)) * 100
 
-        common = sum((ref_chars & hyp_chars).values())
-        precision = common / sum(hyp_chars.values())
-        recall = common / sum(ref_chars.values())
-
-        if precision + recall == 0:
+    def _ngram_fscore(
+        self, ref_ngrams: Counter, hyp_ngrams: Counter, beta: float
+    ) -> float | None:
+        """F_beta between two n-gram counters; None if the order is unavailable."""
+        if not ref_ngrams or not hyp_ngrams:
+            return None
+        common = sum((ref_ngrams & hyp_ngrams).values())
+        if common == 0:
             return 0.0
-
-        f_score = (1 + beta ** 2) * (precision * recall) / (
+        precision = common / sum(hyp_ngrams.values())
+        recall = common / sum(ref_ngrams.values())
+        return (1 + beta ** 2) * precision * recall / (
             beta ** 2 * precision + recall
         )
-        return f_score * 100
 
     def _char_ngrams(self, text: str, order: int) -> Counter:
         """Extract character n-grams from text."""
         text = text.strip()
-        ngrams = Counter()
+        ngrams: Counter = Counter()
         for i in range(len(text) - order + 1):
             ngrams[text[i : i + order]] += 1
         return ngrams
@@ -87,9 +116,14 @@ class TranslationEvaluator:
         if not ref_tokens or not hyp_tokens:
             return 0.0
 
+        # Renormalize weights over available n-gram orders so short or
+        # identical sentences are not punished for missing 3/4-grams.
+        n = min(max_order, len(ref_tokens), len(hyp_tokens))
+        weights = tuple(1.0 / n for _ in range(n))
         score = sentence_bleu(
             [ref_tokens],
             hyp_tokens,
+            weights=weights,
             smoothing_function=self.smoothing,
         )
         return score * 100
@@ -107,20 +141,21 @@ class TranslationEvaluator:
         if not ref_tokens or not hyp_tokens:
             return 0.0
 
-        # Clipped n-gram counts
-        total_precision = 0.0
+        # Clipped n-gram precisions over AVAILABLE orders (geometric mean)
+        precisions: list[float] = []
         for order in range(1, max_order + 1):
-            ref_ngrams = self._token_ngrams(ref_tokens, order)
             hyp_ngrams = self._token_ngrams(hyp_tokens, order)
-
             if not hyp_ngrams:
                 continue
-
+            ref_ngrams = self._token_ngrams(ref_tokens, order)
             common = sum((ref_ngrams & hyp_ngrams).values())
-            precision = common / sum(hyp_ngrams.values())
-            total_precision += precision
+            precisions.append(common / sum(hyp_ngrams.values()))
 
-        mean_precision = total_precision / max_order
+        if not precisions:
+            return 0.0
+        epsilon = 1e-9  # smoothing for zero-match orders
+        log_mean = sum(math.log(p if p > 0 else epsilon) for p in precisions) / len(precisions)
+        mean_precision = math.exp(log_mean)
 
         # Brevity penalty
         ref_len = len(ref_tokens)
@@ -133,9 +168,9 @@ class TranslationEvaluator:
 
         return bp * mean_precision * 100
 
-    def _token_ngrams(self, tokens: List[str], order: int) -> Counter:
+    def _token_ngrams(self, tokens: list[str], order: int) -> Counter:
         """Extract token n-grams."""
-        ngrams = Counter()
+        ngrams: Counter = Counter()
         for i in range(len(tokens) - order + 1):
             ngrams[tuple(tokens[i : i + order])] += 1
         return ngrams
@@ -167,7 +202,7 @@ class TranslationEvaluator:
     def tsr(
         self,
         translation: str,
-        glossary_terms: List[Dict[str, str]],
+        glossary_terms: list[dict[str, str]],
     ) -> float:
         """Compute Term Success Rate: % of glossary terms correctly used."""
         if not glossary_terms:
@@ -187,29 +222,33 @@ class TranslationEvaluator:
     def comet_mqm(
         self,
         source: str,
-        reference: Optional[str],
+        reference: str | None,
         hypothesis: str,
-    ) -> Optional[float]:
+    ) -> float | None:
         """Compute COMET-MQM score (requires COMET model).
 
-        Returns None if COMET is not installed or model not available.
+        Returns None if COMET is not installed or scoring fails (failures
+        are logged, never silent). The model checkpoint is loaded once.
         """
+        global _COMET_MODEL
         try:
             from comet import download_model, load_from_checkpoint  # type: ignore
+        except ImportError:
+            return None  # optional dependency not installed — expected path
 
-            model_path = download_model("Unbabel/wmt22-comet-mqm")
-            model = load_from_checkpoint(model_path)
+        try:
+            if _COMET_MODEL is None:
+                model_path = download_model("Unbabel/wmt22-comet-mqm")
+                _COMET_MODEL = load_from_checkpoint(model_path)
 
-            data = [
-                {
-                    "src": source,
-                    "mt": hypothesis,
-                    "ref": reference or "",
-                }
-            ]
-            result = model.predict(data, batch_size=8, gpus=0)
-            return result[0] if isinstance(result, list) else result.system_score
-        except Exception:
+            data = [{"src": source, "mt": hypothesis, "ref": reference or ""}]
+            result = _COMET_MODEL.predict(data, batch_size=8, gpus=0)
+            scores = getattr(result, "scores", None)
+            if scores is not None:
+                return float(scores[0])
+            return float(getattr(result, "system_score", result))
+        except Exception as exc:
+            logger.warning("COMET-MQM scoring failed: %s", exc)
             return None
 
     # ------------------------------------------------------------------
@@ -218,12 +257,12 @@ class TranslationEvaluator:
     def evaluate(
         self,
         source: str,
-        reference: Optional[str],
+        reference: str | None,
         hypothesis: str,
-        glossary_terms: Optional[List[Dict[str, str]]] = None,
-    ) -> Dict[str, Any]:
+        glossary_terms: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
         """Run full evaluation and return all metrics."""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         result["bleu"] = self.bleu(reference or "", hypothesis)
         result["chrf"] = self.chrf(reference or "", hypothesis)
