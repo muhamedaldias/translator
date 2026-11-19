@@ -47,8 +47,8 @@ def main() -> None:
         status = "APPROVED" if r["approved"] else "NEEDS REVIEW"
         print(f"  Chapter {r['chapter']}: score={r['judge_score']}, {status}")
 
-    status = translator.get_status()
-    print(f"\nProgress: {status['completed']}/{status['total_chapters']} ({status['completion_percent']:.1f}%)")
+    overall = translator.get_status()
+    print(f"\nProgress: {overall['completed']}/{overall['total_chapters']} ({overall['completion_percent']:.1f}%)")
 
 
 if __name__ == "__main__":
