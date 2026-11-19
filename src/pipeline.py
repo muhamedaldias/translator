@@ -12,20 +12,22 @@ Integrates real LLM calls and dictionary skills for production-quality output.
 from __future__ import annotations
 
 import json
-import os
+import logging
 import re
 import sys
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.arabic import ArabicProcessor
-from src.dictionary import DictionaryManager, DictionaryEntry
+from src.dictionary import DictionaryManager
 from src.evaluation import TranslationEvaluator
 from src.glossary import Glossary
 from src.llm_client import LLMManager, LLMResponse
@@ -35,11 +37,12 @@ from src.llm_client import LLMManager, LLMResponse
 class AnalysisResult:
     register: str = "MSA"
     domain: str = "general"
-    entities: List[Dict[str, Any]] = field(default_factory=list)
-    gender_context: Dict[str, str] = field(default_factory=dict)
-    orthography_norm: Optional[str] = None
-    difficult_terms: List[str] = field(default_factory=list)
-    code_blocks: List[str] = field(default_factory=list)
+    entities: list[dict[str, Any]] = field(default_factory=list)
+    gender_context: dict[str, str] = field(default_factory=dict)
+    orthography_norm: str | None = None
+    difficult_terms: list[str] = field(default_factory=list)
+    code_blocks: list[str] = field(default_factory=list)
+    protected_source: str | None = None
     word_count: int = 0
     sentence_count: int = 0
     has_rtl: bool = False
@@ -49,17 +52,17 @@ class AnalysisResult:
 @dataclass
 class TranslationResult:
     draft_translation: str = ""
-    confidence_flags: List[Dict[str, Any]] = field(default_factory=list)
-    terms_for_review: List[str] = field(default_factory=list)
+    confidence_flags: list[dict[str, Any]] = field(default_factory=list)
+    terms_for_review: list[str] = field(default_factory=list)
     word_count: int = 0
     segments_translated: int = 0
-    llm_response: Optional[Dict[str, Any]] = None
+    llm_response: dict[str, Any] | None = None
 
 
 @dataclass
 class PostEditResult:
     revised_translation: str = ""
-    corrections: List[Dict[str, Any]] = field(default_factory=list)
+    corrections: list[dict[str, Any]] = field(default_factory=list)
     corrections_count: int = 0
     diacritics_applied: bool = False
 
@@ -67,13 +70,14 @@ class PostEditResult:
 @dataclass
 class ReviewResult:
     overall_score: int = 0
-    dimension_scores: Dict[str, int] = field(default_factory=dict)
-    errors: List[Dict[str, Any]] = field(default_factory=list)
+    dimension_scores: dict[str, int] = field(default_factory=dict)
+    errors: list[dict[str, Any]] = field(default_factory=list)
     critical_errors: int = 0
     major_errors: int = 0
     minor_errors: int = 0
     glossary_adherence: float = 0.0
     recommendation: str = "revise"
+    score_source: str = "fallback"  # "llm" when validated LLM scores were used
 
 
 @dataclass
@@ -81,9 +85,9 @@ class JudgeResult:
     score: int = 0
     passed: bool = False
     decision: str = "revise"
-    dimension_scores: Dict[str, int] = field(default_factory=dict)
+    dimension_scores: dict[str, int] = field(default_factory=dict)
     rationale: str = ""
-    specific_issues: List[Dict[str, Any]] = field(default_factory=list)
+    specific_issues: list[dict[str, Any]] = field(default_factory=list)
     iteration: int = 0
     max_iterations: int = 3
 
@@ -104,15 +108,16 @@ class TranslationPipeline:
         self,
         source_lang: str = "en",
         target_lang: str = "ar",
-        config_path: Optional[str] = None,
-        glossary_path: Optional[str] = None,
+        config_path: str | None = None,
+        glossary_path: str | None = None,
         llm_provider: str = "openai",
-        llm_model: Optional[str] = None,
-        llm_api_key: Optional[str] = None,
-        use_llm: bool = False,
+        llm_model: str | None = None,
+        llm_api_key: str | None = None,
+        use_llm: bool | None = None,
     ) -> None:
         self.source_lang = source_lang
         self.target_lang = target_lang
+        self._config_explicit = config_path is not None
         self.config_path = config_path or str(
             PROJECT_ROOT / "config" / "translator.yaml"
         )
@@ -127,10 +132,14 @@ class TranslationPipeline:
 
         self.max_iterations = 3
         self.quality_threshold = 85
-        self.use_llm = use_llm
+        # None = follow config; True/False = explicit caller intent that
+        # config must never silently override
+        self._explicit_use_llm = use_llm is not None
+        self.use_llm = bool(use_llm)
+        self._last_completion_truncated = False
 
         # Initialize LLM manager if requested
-        self.llm: Optional[LLMManager] = None
+        self.llm: LLMManager | None = None
         if use_llm:
             self.llm = LLMManager(
                 provider=llm_provider,
@@ -138,40 +147,66 @@ class TranslationPipeline:
                 api_key=llm_api_key,
             )
 
-        # Load config
-        self._load_config()
+        # Load config (clean up resources if configuration fails)
+        try:
+            self._load_config()
+        except Exception:
+            self.dictionary.close()
+            raise
 
     def _load_config(self) -> None:
-        """Load configuration from translator.yaml."""
+        """Load configuration from translator.yaml.
+
+        Missing default config -> defaults + info log. Missing or malformed
+        EXPLICIT config -> raise (never silently ignore user settings).
+        """
         try:
             import yaml  # type: ignore
+        except ImportError:
+            if self._config_explicit:
+                raise
+            logger.warning("PyYAML not installed; using default configuration")
+            return
 
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
+        config_file = Path(self.config_path)
+        if not config_file.exists():
+            if self._config_explicit:
+                raise FileNotFoundError(f"Config file not found: {config_file}")
+            logger.info("No config at %s; using defaults", config_file)
+            return
 
-            pipeline_cfg = config.get("pipeline", {})
-            self.max_iterations = pipeline_cfg.get("max_iterations", 3)
-            self.quality_threshold = pipeline_cfg.get("quality_threshold", 85)
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+        except yaml.YAMLError as exc:
+            raise ValueError(f"Malformed config {config_file}: {exc}") from exc
+        if not isinstance(config, dict):
+            raise TypeError(f"Config must be a YAML mapping: {config_file}")
 
-            arabic_cfg = config.get("arabic", {})
-            self.arabic.diacritics_policy = arabic_cfg.get(
-                "diacritics_policy", "remove"
+        pipeline_cfg = config.get("pipeline", {})
+        self.max_iterations = pipeline_cfg.get("max_iterations", 3)
+        self.quality_threshold = pipeline_cfg.get("quality_threshold", 85)
+
+        arabic_cfg = config.get("arabic", {})
+        self.arabic.diacritics_policy = arabic_cfg.get("diacritics_policy", "remove")
+        self.arabic.orthography_normalization = arabic_cfg.get(
+            "orthography_normalization", True
+        )
+        self.arabic.normalize_output = arabic_cfg.get("normalize_output", False)
+
+        llm_cfg = config.get("llm", {})
+        if llm_cfg.get("api_key"):
+            logger.warning(
+                "API key in config file is insecure (committed/shared); "
+                "prefer OPENAI_API_KEY / ANTHROPIC_API_KEY environment variables"
             )
-            self.arabic.orthography_normalization = arabic_cfg.get(
-                "orthography_normalization", True
+        if llm_cfg.get("enabled") and self.llm is None and not self._explicit_use_llm:
+            self.use_llm = True
+            self.llm = LLMManager(
+                provider=llm_cfg.get("provider", "openai"),
+                model=llm_cfg.get("model"),
+                api_key=llm_cfg.get("api_key"),
             )
-
-            llm_cfg = config.get("llm", {})
-            if llm_cfg.get("enabled") and self.llm is None:
-                self.use_llm = True
-                self.llm = LLMManager(
-                    provider=llm_cfg.get("provider", "openai"),
-                    model=llm_cfg.get("model"),
-                    api_key=llm_cfg.get("api_key"),
-                )
-
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     # LLM helper
@@ -183,30 +218,35 @@ class TranslationPipeline:
         temperature: float = 0.3,
         max_tokens: int = 2000,
     ) -> str:
-        """Send a completion request to the LLM or return a placeholder."""
+        """Send a completion request to the LLM or return a placeholder.
+
+        LLM failures RAISE (surfaced by run()); they are never converted
+        into fake translation text.
+        """
         if self.llm and self.use_llm:
-            try:
-                response: LLMResponse = self.llm.complete(
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=temperature,
-                    max_tokens=max_tokens,
+            self._last_completion_truncated = False
+            response: LLMResponse = self.llm.complete(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if response.finish_reason == "length":
+                self._last_completion_truncated = True
+                logger.warning(
+                    "LLM completion truncated at max_tokens=%s", max_tokens
                 )
-                return response.content
-            except Exception as exc:
-                # Fall back to placeholder if LLM fails
-                return f"[LLM ERROR: {exc}] Placeholder translation needed."
-        else:
-            # No LLM configured — return structured placeholder
-            return f"[LLM REQUIRED] {user_prompt[:200]}..."
+            return response.content
+        # No LLM configured — return structured placeholder
+        return f"[LLM REQUIRED] {user_prompt[:200]}..."
 
     # ------------------------------------------------------------------
     # Stage 1: Analysis
     # ------------------------------------------------------------------
     def analyze(
-        self, source_text: str, domain_hint: Optional[str] = None
+        self, source_text: str, domain_hint: str | None = None
     ) -> AnalysisResult:
         """Run Analysis Agent: pre-process source text, extract context."""
         result = AnalysisResult()
@@ -229,8 +269,9 @@ class TranslationPipeline:
             result.domain = domain_hint
 
         # Extract code blocks (preserve unchanged)
-        code_pattern = r"`[^`]+`|<[^>]+>|\{\{[^}]+\}\}|\$\{[^}]+\}"
-        result.code_blocks = re.findall(code_pattern, source_text)
+        protected, code_blocks = self.arabic.protect_code_blocks(source_text)
+        result.code_blocks = code_blocks
+        result.protected_source = protected
 
         # Difficult terms (use dictionary + heuristics)
         difficult_terms = set()
@@ -245,8 +286,8 @@ class TranslationPipeline:
             )
             for entry in dict_entries:
                 difficult_terms.add(entry.word)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Dictionary term extraction failed: %s", exc)
 
         result.difficult_terms = sorted(difficult_terms)
 
@@ -269,7 +310,7 @@ class TranslationPipeline:
         self,
         source_text: str,
         analysis: AnalysisResult,
-        previous_context: Optional[str] = None,
+        previous_context: str | None = None,
     ) -> TranslationResult:
         """Run Translator Agent: produce draft translation with glossary injection (via LLM)."""
         result = TranslationResult()
@@ -280,7 +321,7 @@ class TranslationPipeline:
         )
 
         # Dictionary lookups for difficult terms
-        dict_definitions: List[Dict[str, Any]] = []
+        dict_definitions: list[dict[str, Any]] = []
         for term in analysis.difficult_terms[:5]:
             entry = self.dictionary.lookup_definition(term, dictionary="wordnet")
             if entry:
@@ -306,7 +347,10 @@ class TranslationPipeline:
         # Clean up placeholder markers if present
         if draft.startswith("[LLM"):
             # Apply glossary substitutions manually for placeholder mode
-            draft = self._apply_glossary_substitutions(source_text, glossary_terms)
+            draft = self._apply_glossary_substitutions(source_text, glossary_terms, analysis)
+        elif analysis.code_blocks:
+            # LLM path: restore protected code blocks by index (order-safe)
+            draft = self.arabic.restore_code_blocks(draft, analysis.code_blocks)
 
         result.draft_translation = draft
         result.word_count = analysis.word_count
@@ -320,6 +364,12 @@ class TranslationPipeline:
             {"term": t, "position": 0, "suggestion": "review_needed"}
             for t in analysis.difficult_terms[:5]
         ]
+        if self._last_completion_truncated:
+            result.confidence_flags.append({
+                "term": "__truncated__",
+                "position": -1,
+                "suggestion": "completion hit max_tokens; translation may be incomplete",
+            })
 
         # Store LLM response metadata
         result.llm_response = {
@@ -332,8 +382,8 @@ class TranslationPipeline:
     def _build_translator_system_prompt(
         self,
         analysis: AnalysisResult,
-        glossary_terms: List[Dict[str, Any]],
-        dict_definitions: List[Dict[str, Any]],
+        glossary_terms: list[dict[str, Any]],
+        dict_definitions: list[dict[str, Any]],
     ) -> str:
         """Build the Translator Agent system prompt."""
         lines = [
@@ -388,26 +438,55 @@ class TranslationPipeline:
         self,
         source_text: str,
         analysis: AnalysisResult,
-        previous_context: Optional[str] = None,
+        previous_context: str | None = None,
     ) -> str:
         """Build the Translator Agent user prompt."""
-        lines = [f"Source text to translate:\n{source_text}", ""]
+        # Send code-protected text to the LLM when blocks were extracted
+        text_for_llm = analysis.protected_source if analysis.code_blocks else source_text
+        lines = [f"Source text to translate:\n{text_for_llm}", ""]
+        if analysis.code_blocks:
+            lines.extend([
+                ("Markers like ___CODE_BLOCK_0___ are protected code blocks: "
+                 "keep each marker EXACTLY as-is, in its original position."),
+                "",
+            ])
         if previous_context:
-            lines.append(f"Previous chapter context:\n{previous_context}", "")
+            lines.extend([f"Previous chapter context:\n{previous_context}", ""])
         lines.append("Translate the above text now.")
         return "\n".join(lines)
 
     def _apply_glossary_substitutions(
-        self, source_text: str, glossary_terms: List[Dict[str, Any]]
+        self, source_text: str, glossary_terms: list[dict[str, Any]], analysis: AnalysisResult
     ) -> str:
-        """Apply glossary term substitutions (placeholder mode fallback)."""
-        draft = source_text
+        """Apply glossary term substitutions (placeholder mode fallback).
+
+        Protects code blocks before substitution and restores them after,
+        so glossary terms inside code blocks (e.g. XML tags, IDs) are not mangled.
+        """
+        # Extract and protect code blocks
+        protected, blocks = self.arabic.protect_code_blocks(source_text)
+
+        # Apply glossary substitutions to protected text only:
+        # whole-word, case-insensitive (never corrupt 'malfunction' via 'function')
+        draft = protected
         for term in glossary_terms:
             en = term.get("en", term.get("source", ""))
             ar = term.get("ar", term.get("target", ""))
             if en and ar:
-                draft = draft.replace(en, ar)
-        return f"[ترجمة مسودة مسجل: {analysis.register if hasattr(self, '_last_analysis') else 'MSA'}] {draft}"
+                def _sub(m: re.Match[str], replacement: str = ar) -> str:
+                    return replacement
+
+                draft = re.sub(
+                    r"\b" + re.escape(en) + r"\b",
+                    _sub,
+                    draft,
+                    flags=re.IGNORECASE,
+                )
+
+        # Restore code blocks (order-independent, indexed markers)
+        draft = self.arabic.restore_code_blocks(draft, blocks)
+
+        return f"[ترجمة مسودة مسجل: {analysis.register}] {draft}"
 
     # ------------------------------------------------------------------
     # Stage 3: Post-Edit
@@ -426,7 +505,7 @@ class TranslationPipeline:
 
         corrections = []
 
-        # Gender agreement check
+        # Gender agreement check (placeholder — requires LLM analysis of the draft)
         if analysis.gender_context.get("subject_gender") != "neutral":
             corrections.append({
                 "position": 0,
@@ -435,14 +514,21 @@ class TranslationPipeline:
                 "reason": "gender_agreement",
             })
 
-        # Orthography normalization
-        if self.arabic.orthography_normalization:
+        # Orthography normalization of OUTPUT is opt-in (lossy: أحمد -> احمد);
+        # analysis-stage normalization is controlled separately.
+        if self.arabic.orthography_normalization and self.arabic.normalize_output:
             normalized = self.arabic.normalize_orthography(draft)
             if normalized != draft:
+                # Find first position where text differs
+                pos = 0
+                for c1, c2 in zip(draft, normalized):
+                    if c1 != c2:
+                        break
+                    pos += 1
                 corrections.append({
-                    "position": 0,
-                    "original": draft[:20],
-                    "corrected": normalized[:20],
+                    "position": pos,
+                    "original": draft[pos:pos + 20],
+                    "corrected": normalized[pos:pos + 20],
                     "reason": "orthography",
                 })
                 result.revised_translation = normalized
@@ -451,10 +537,16 @@ class TranslationPipeline:
         if self.arabic.diacritics_policy == "remove":
             stripped = self.arabic.remove_diacritics(draft)
             if stripped != draft:
+                # Find first position containing a diacritic IN THE DRAFT
+                pos = 0
+                for ch in draft:
+                    if self.arabic.DIACRITICS.search(ch):
+                        break
+                    pos += 1
                 corrections.append({
-                    "position": 0,
-                    "original": draft[:20],
-                    "corrected": stripped[:20],
+                    "position": pos,
+                    "original": draft[pos:pos + 20],
+                    "corrected": stripped[pos:pos + 20],
                     "reason": "diacritics",
                 })
                 result.revised_translation = stripped
@@ -530,23 +622,27 @@ class TranslationPipeline:
                 max_tokens=1500,
             )
 
-            # Try to parse JSON from LLM response
+            # Parse and TYPE-VALIDATE the LLM JSON: string scores or errors
+            # must never crash the weighted arithmetic below
             try:
-                # Extract JSON block
-                json_match = re.search(
-                    r"\{.*\}", review_text, re.DOTALL
-                )
+                json_match = re.search(r"\{.*\}", review_text, re.DOTALL)
                 if json_match:
                     review_data = json.loads(json_match.group())
-                    result.dimension_scores = review_data.get(
-                        "dimension_scores", {}
-                    )
-                    result.errors = review_data.get("errors", [])
-                    result.recommendation = review_data.get(
-                        "recommendation", "revise"
-                    )
-            except Exception:
-                pass
+                    scores = review_data.get("dimension_scores", {})
+                    if isinstance(scores, dict):
+                        valid = {
+                            k: min(100, max(0, int(v)))
+                            for k, v in scores.items()
+                            if isinstance(v, (int, float)) and not isinstance(v, bool)
+                        }
+                        if valid:
+                            result.dimension_scores = valid
+                            result.score_source = "llm"
+                    errors = review_data.get("errors", [])
+                    if isinstance(errors, list):
+                        result.errors = [e for e in errors if isinstance(e, dict)]
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.warning("Review JSON parse failed: %s", exc)
 
         # Fallback scores if LLM not available or parsing failed
         if not result.dimension_scores:
@@ -566,8 +662,10 @@ class TranslationPipeline:
             + 0.10 * result.dimension_scores.get("coherence", 80)
         )
 
-        # Glossary adherence
-        result.glossary_adherence = self.glossary.check_adherence(translation)
+        # Glossary adherence scoped to terms relevant to this source
+        result.glossary_adherence = self.glossary.check_adherence(
+            translation, source_text=source_text
+        )
 
         # Error counts
         result.critical_errors = sum(
@@ -580,7 +678,8 @@ class TranslationPipeline:
             1 for e in result.errors if e.get("severity") == "minor"
         )
 
-        if result.overall_score >= 85:
+        # Deterministic recommendation (authoritative; LLM suggestion is advisory)
+        if result.overall_score >= self.quality_threshold:
             result.recommendation = "approve"
         elif result.overall_score >= 70:
             result.recommendation = "revise"
@@ -633,38 +732,41 @@ class TranslationPipeline:
                 json_match = re.search(r"\{.*\}", judge_text, re.DOTALL)
                 if json_match:
                     judge_data = json.loads(json_match.group())
-                    result.score = judge_data.get("score", review.overall_score)
-                    result.decision = judge_data.get(
-                        "decision", result.decision
-                    )
-                    result.rationale = judge_data.get(
-                        "rationale", result.rationale
-                    )
-                    result.passed = result.decision == "approve"
-            except Exception:
-                pass
+                    raw_score = judge_data.get("score")
+                    if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool):
+                        result.score = min(100, max(0, int(raw_score)))
+                    rationale = judge_data.get("rationale")
+                    if isinstance(rationale, str) and rationale.strip():
+                        result.rationale = rationale.strip()
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                logger.warning("Judge JSON parse failed: %s", exc)
 
-        # Fallback decision logic
+        # Deterministic quality gate — AUTHORITATIVE. The LLM judge's score
+        # and rationale inform it, but an LLM "approve" can never bypass the
+        # configured threshold (defense against prompt-injection/persuasion).
         if result.score >= self.quality_threshold:
             result.passed = True
             result.decision = "approve"
-            result.rationale = (
-                f"Translation scored {result.score}/100, "
-                f"meeting threshold {self.quality_threshold}."
-            )
+            if not result.rationale:
+                result.rationale = (
+                    f"Translation scored {result.score}/100, "
+                    f"meeting threshold {self.quality_threshold}."
+                )
         elif result.score >= 70 and iteration < self.max_iterations:
             result.passed = False
             result.decision = "revise"
-            result.rationale = (
-                f"Translation scored {result.score}/100. One revision allowed "
-                f"(iteration {iteration}/{self.max_iterations})."
-            )
+            if not result.rationale:
+                result.rationale = (
+                    f"Translation scored {result.score}/100. One revision allowed "
+                    f"(iteration {iteration}/{self.max_iterations})."
+                )
         else:
             result.passed = False
             result.decision = "retranslate"
-            result.rationale = (
-                f"Translation scored {result.score}/100. Full re-translation required."
-            )
+            if not result.rationale:
+                result.rationale = (
+                    f"Translation scored {result.score}/100. Full re-translation required."
+                )
 
         result.specific_issues = review.errors
 
@@ -673,47 +775,112 @@ class TranslationPipeline:
     # ------------------------------------------------------------------
     # Full Pipeline
     # ------------------------------------------------------------------
+    def _revise(
+        self,
+        current: str,
+        source_text: str,
+        review: ReviewResult,
+        analysis: AnalysisResult,
+    ) -> str:
+        """Editor pass: apply reviewer feedback to produce a revised draft."""
+        system_prompt = (
+            "You are a translation editor. Revise the translation to fix the "
+            "reviewer's errors while preserving meaning, formatting, and any "
+            "___CODE_BLOCK_n___ markers exactly. Output ONLY the revised translation."
+        )
+        user_prompt = (
+            f"Source:\n{source_text}\n\n"
+            f"Current translation:\n{current}\n\n"
+            f"Reviewer errors:\n{json.dumps(review.errors, ensure_ascii=False)}\n\n"
+            "Produce the revised translation now."
+        )
+        revised = self._llm_complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.2,
+            max_tokens=2000,
+        )
+        if revised.startswith("[LLM"):
+            return current
+        if analysis.code_blocks:
+            revised = self.arabic.restore_code_blocks(revised, analysis.code_blocks)
+        return revised
+
     def run(
         self,
         source_text: str,
-        domain_hint: Optional[str] = None,
-        previous_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Run the complete pipeline and return the final result."""
+        domain_hint: str | None = None,
+        previous_context: str | None = None,
+    ) -> dict[str, Any]:
+        """Run the complete pipeline and return the final result.
+
+        Never fabricates success: LLM failures yield approved=False with an
+        error and empty translation; placeholder mode is loudly flagged.
+        """
         pipeline_id = str(uuid.uuid4())
-
-        # Stage 1: Analysis
-        analysis = self.analyze(source_text, domain_hint)
-
-        # Stage 2: Translate
-        translation = self.translate(source_text, analysis, previous_context)
-
-        # Stage 3: Post-edit
-        post_edit_result = self.post_edit(
-            translation.draft_translation, analysis
-        )
-        current_translation = post_edit_result.revised_translation
-
-        # Stage 4: Review
-        review = self.review(current_translation, source_text, analysis)
-
-        # Stage 5: Judge with iteration loop
-        iteration = 1
-        judge_result = self.judge(current_translation, review, iteration)
-
-        while (
-            judge_result.decision in ("revise", "retranslate")
-            and iteration < self.max_iterations
-        ):
-            iteration += 1
-            # Re-run review and judge (simplified iteration)
-            review = self.review(current_translation, source_text, analysis)
-            judge_result = self.judge(current_translation, review, iteration)
-
-        return {
+        mode = "llm" if (self.llm and self.use_llm) else "placeholder"
+        warnings: list[str] = []
+        if mode == "placeholder":
+            warnings.append(
+                "LLM not configured: output is a glossary-substituted PLACEHOLDER, "
+                "not a real translation. Set an API key (OPENAI_API_KEY / "
+                "ANTHROPIC_API_KEY) and enable --use-llm."
+            )
+        base: dict[str, Any] = {
             "pipeline_id": pipeline_id,
             "source_text": source_text,
             "target_lang": self.target_lang,
+            "mode": mode,
+            "warnings": warnings,
+        }
+        try:
+            # Stage 1: Analysis
+            analysis = self.analyze(source_text, domain_hint)
+
+            # Stage 2: Translate
+            translation = self.translate(source_text, analysis, previous_context)
+
+            # Stage 3: Post-edit
+            post_edit_result = self.post_edit(
+                translation.draft_translation, analysis
+            )
+            current_translation = post_edit_result.revised_translation
+
+            # Stage 4: Review
+            review = self.review(current_translation, source_text, analysis)
+
+            # Stage 5: Judge with a REAL revision loop (LLM mode only)
+            iteration = 1
+            judge_result = self.judge(current_translation, review, iteration)
+
+            while (
+                judge_result.decision in ("revise", "retranslate")
+                and iteration < self.max_iterations
+                and mode == "llm"
+            ):
+                iteration += 1
+                current_translation = self._revise(
+                    current_translation, source_text, review, analysis
+                )
+                review = self.review(current_translation, source_text, analysis)
+                judge_result = self.judge(current_translation, review, iteration)
+        except Exception as exc:
+            logger.error("Pipeline failed: %s", exc)
+            return {
+                **base,
+                "analysis": AnalysisResult(),
+                "translation": "",
+                "post_edits": [],
+                "review": ReviewResult(),
+                "judge": JudgeResult(),
+                "approved": False,
+                "iterations": 0,
+                "error": str(exc),
+                "warnings": warnings + [f"Pipeline error: {exc}"],
+            }
+
+        return {
+            **base,
             "analysis": analysis,
             "translation": current_translation,
             "post_edits": post_edit_result.corrections,
@@ -726,6 +893,12 @@ class TranslationPipeline:
     def close(self) -> None:
         """Close resources."""
         self.dictionary.close()
+
+    def __enter__(self) -> TranslationPipeline:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
 
 def main() -> None:
@@ -746,9 +919,10 @@ def main() -> None:
         "--llm-provider", default="openai", help="LLM provider (openai, anthropic, local)"
     )
     parser.add_argument("--llm-model", help="LLM model name")
-    parser.add_argument("--llm-api-key", help="LLM API key")
+    parser.add_argument("--llm-api-key", help="LLM API key (prefer env vars: keys in argv are visible in process listings)")
     parser.add_argument(
-        "--use-llm", action="store_true", help="Enable real LLM calls"
+        "--use-llm", action="store_true", default=None,
+        help="Enable real LLM calls (default: follow config llm.enabled)",
     )
 
     args = parser.parse_args()
@@ -772,6 +946,12 @@ def main() -> None:
 
     try:
         result = pipeline.run(source_text, domain_hint=args.domain)
+
+        for warning in result.get("warnings", []):
+            print(f"WARNING: {warning}", file=sys.stderr)
+        if result.get("error"):
+            print(f"ERROR: pipeline failed: {result['error']}", file=sys.stderr)
+            sys.exit(1)
 
         output_text = result["translation"]
         if args.output:

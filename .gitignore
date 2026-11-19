@@ -60,3 +60,7 @@ data/glossary.json
 data/cache/
 data/**/cache.db
 data/**/*.db
+
+# Runtime state / coverage artifacts
+data/manifest.json
+.coverage

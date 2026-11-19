@@ -1,0 +1,5 @@
+pytest>=7.0.0
+pytest-cov>=4.0
+ruff>=0.4
+mypy>=1.8
+bandit>=1.7

@@ -17,13 +17,17 @@ Plus Phase 2 metered APIs (with caching):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 try:
     import requests  # type: ignore
@@ -35,12 +39,12 @@ except Exception:  # pragma: no cover
 class DictionaryEntry:
     """Standardized dictionary entry."""
     word: str
-    pos: Optional[str] = None  # part of speech
-    definition: Optional[str] = None
-    synonyms: List[str] = field(default_factory=list)
-    antonyms: List[str] = field(default_factory=list)
-    translations: Dict[str, List[str]] = field(default_factory=dict)  # lang -> [translations]
-    examples: List[str] = field(default_factory=list)
+    pos: str | None = None  # part of speech
+    definition: str | None = None
+    synonyms: list[str] = field(default_factory=list)
+    antonyms: list[str] = field(default_factory=list)
+    translations: dict[str, list[str]] = field(default_factory=dict)  # lang -> [translations]
+    examples: list[str] = field(default_factory=list)
     source: str = ""  # wordnet, wiktionary, merriam_webster, etc.
 
 
@@ -49,12 +53,12 @@ class DictionaryManager:
 
     def __init__(
         self,
-        data_dir: Optional[str] = None,
-        cache_dir: Optional[str] = None,
-        merriam_webster_key: Optional[str] = None,
-        collins_key: Optional[str] = None,
-        oxford_app_id: Optional[str] = None,
-        oxford_app_key: Optional[str] = None,
+        data_dir: str | None = None,
+        cache_dir: str | None = None,
+        merriam_webster_key: str | None = None,
+        collins_key: str | None = None,
+        oxford_app_id: str | None = None,
+        oxford_app_key: str | None = None,
     ) -> None:
         self.data_dir = Path(data_dir) if data_dir else Path(
             __file__).resolve().parent.parent / "data" / "dictionaries"
@@ -70,13 +74,14 @@ class DictionaryManager:
         self.oxford_app_key = oxford_app_key or os.getenv("OXFORD_APP_KEY")
 
         # Cache (in-memory + SQLite)
-        self._memory_cache: Dict[str, Any] = {}
+        self._memory_cache: dict[str, Any] = {}
         self._init_sqlite_cache()
 
-        # Loaded resources
-        self.wordnet: Optional[Any] = None
-        self.wiktionary_en_ar: Dict[str, List[str]] = {}
-        self.roget_synonyms: Dict[str, List[str]] = {}
+        # Loaded resources (private names: public method names must not be
+        # shadowed by instance attributes — see lookup_en_ar/lookup_synonyms)
+        self.wordnet: Any | None = None
+        self._wiktionary_data: dict[str, list[str]] = {}
+        self._roget_data: dict[str, list[str]] = {}
 
         self._load_resources()
 
@@ -98,18 +103,29 @@ class DictionaryManager:
         )
         self._conn.commit()
 
-    def _cache_get(self, key: str) -> Optional[Any]:
-        """Get value from cache."""
-        if key in self._memory_cache:
-            return self._memory_cache[key]
+    def _cache_get(self, key: str) -> Any | None:
+        """Get value from cache (TTL honored in both memory and sqlite layers)."""
+        hit = self._memory_cache.get(key)
+        if hit is not None:
+            value, expiry = hit
+            if expiry > time.time():
+                return value
+            del self._memory_cache[key]
 
         row = self._conn.execute(
             "SELECT value, expiry FROM cache WHERE key = ?", (key,)
         ).fetchone()
 
         if row and row[1] > time.time():
-            self._memory_cache[key] = json.loads(row[0])
-            return self._memory_cache[key]
+            try:
+                value = json.loads(row[0])
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Corrupt cache entry for %r; dropping it", key)
+                self._conn.execute("DELETE FROM cache WHERE key = ?", (key,))
+                self._conn.commit()
+                return None
+            self._memory_cache[key] = (value, row[1])
+            return value
 
         if row:
             self._conn.execute("DELETE FROM cache WHERE key = ?", (key,))
@@ -119,10 +135,11 @@ class DictionaryManager:
 
     def _cache_set(self, key: str, value: Any, ttl_seconds: int = 86400) -> None:
         """Set value in cache."""
-        self._memory_cache[key] = value
+        expiry = time.time() + ttl_seconds
+        self._memory_cache[key] = (value, expiry)
         self._conn.execute(
             "INSERT OR REPLACE INTO cache (key, value, expiry) VALUES (?, ?, ?)",
-            (key, json.dumps(value, ensure_ascii=False), time.time() + ttl_seconds),
+            (key, json.dumps(value, ensure_ascii=False), expiry),
         )
         self._conn.commit()
 
@@ -155,8 +172,8 @@ class DictionaryManager:
             from nltk.corpus import wordnet as wn  # type: ignore
 
             self.wordnet = wn
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("NLTK WordNet unavailable: %s", exc)
 
     def _load_wiktionary(self) -> None:
         """Load Wiktionary EN-AR dump (local)."""
@@ -169,7 +186,7 @@ class DictionaryManager:
         for path in candidates:
             if path.exists():
                 with open(path, "r", encoding="utf-8") as f:
-                    self.wiktionary_en_ar = json.load(f)
+                    self._wiktionary_data = json.load(f)
                 return
 
     def _load_roget(self) -> None:
@@ -183,20 +200,20 @@ class DictionaryManager:
         for path in candidates:
             if path.exists():
                 with open(path, "r", encoding="utf-8") as f:
-                    self.roget_synonyms = json.load(f)
+                    self._roget_data = json.load(f)
                 return
 
     # ------------------------------------------------------------------
     # WordNet operations
     # ------------------------------------------------------------------
-    def wordnet_synonyms(self, word: str, pos: Optional[str] = None) -> List[str]:
+    def wordnet_synonyms(self, word: str, pos: str | None = None) -> list[str]:
         """Get synonyms from WordNet."""
         cache_key = f"wn:syn:{word}:{pos or 'any'}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        synonyms: List[str] = []
+        synonyms: list[str] = []
 
         # NLTK WordNet
         if hasattr(self.wordnet, "synsets"):
@@ -209,8 +226,8 @@ class DictionaryManager:
                 for syn in synsets:
                     for lemma in syn.lemmas():
                         synonyms.append(lemma.name().replace("_", " "))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("WordNet synonym lookup failed for %r: %s", word, exc)
 
         # OEWN JSON
         elif isinstance(self.wordnet, dict):
@@ -224,14 +241,14 @@ class DictionaryManager:
         self._cache_set(cache_key, synonyms)
         return synonyms
 
-    def wordnet_definition(self, word: str, pos: Optional[str] = None) -> Optional[str]:
+    def wordnet_definition(self, word: str, pos: str | None = None) -> str | None:
         """Get definition from WordNet."""
         cache_key = f"wn:def:{word}:{pos or 'any'}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        definition: Optional[str] = None
+        definition: str | None = None
 
         if hasattr(self.wordnet, "synsets"):
             try:
@@ -242,8 +259,8 @@ class DictionaryManager:
                 synsets = wn.synsets(word, pos=wn_pos) if wn_pos else wn.synsets(word)
                 if synsets:
                     definition = synsets[0].definition()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("WordNet definition lookup failed for %r: %s", word, exc)
 
         elif isinstance(self.wordnet, dict):
             entry = self.wordnet.get(word.lower())
@@ -256,19 +273,19 @@ class DictionaryManager:
     # ------------------------------------------------------------------
     # Wiktionary EN-AR
     # ------------------------------------------------------------------
-    def wiktionary_en_ar(self, word: str) -> List[str]:
+    def wiktionary_en_ar(self, word: str) -> list[str]:
         """Get EN-AR translations from Wiktionary."""
         cache_key = f"wk:en-ar:{word.lower()}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        translations = self.wiktionary_en_ar.get(word.lower(), [])
+        translations = self._wiktionary_data.get(word.lower(), [])
 
         self._cache_set(cache_key, translations)
         return translations
 
-    def wiktionary_ar_en(self, word: str) -> List[str]:
+    def wiktionary_ar_en(self, word: str) -> list[str]:
         """Get AR-EN translations from Wiktionary."""
         cache_key = f"wk:ar-en:{word.lower()}"
         cached = self._cache_get(cache_key)
@@ -276,8 +293,8 @@ class DictionaryManager:
             return cached
 
         # Reverse lookup
-        translations: List[str] = []
-        for en_word, ar_translations in self.wiktionary_en_ar.items():
+        translations: list[str] = []
+        for en_word, ar_translations in self._wiktionary_data.items():
             if word.lower() in [t.lower() for t in ar_translations]:
                 translations.append(en_word)
 
@@ -287,14 +304,14 @@ class DictionaryManager:
     # ------------------------------------------------------------------
     # Roget's Thesaurus
     # ------------------------------------------------------------------
-    def roget_synonyms(self, word: str) -> List[str]:
+    def roget_synonyms(self, word: str) -> list[str]:
         """Get concept-based synonyms from Roget's Thesaurus."""
         cache_key = f"roget:syn:{word.lower()}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        synonyms = self.roget_synonyms.get(word.lower(), [])
+        synonyms = self._roget_data.get(word.lower(), [])
 
         self._cache_set(cache_key, synonyms)
         return synonyms
@@ -302,7 +319,7 @@ class DictionaryManager:
     # ------------------------------------------------------------------
     # Datamuse API
     # ------------------------------------------------------------------
-    def datamuse_synonyms(self, word: str) -> List[str]:
+    def datamuse_synonyms(self, word: str) -> list[str]:
         """Get synonyms from Datamuse API (free, no key)."""
         if requests is None:
             return []
@@ -312,27 +329,30 @@ class DictionaryManager:
         if cached is not None:
             return cached
 
-        synonyms: List[str] = []
+        synonyms: list[str] = []
 
         try:
             resp = requests.get(
                 "https://api.datamuse.com/words",
-                params={"rel_syn": word, "max": 10},
+                params={"rel_syn": word, "max": "10"},
                 timeout=10,
             )
             if resp.status_code == 200:
                 data = resp.json()
                 synonyms = [item.get("word", "") for item in data if item.get("word")]
-        except Exception:
-            pass
+                # Cache successes only — never negatively cache a failure for a week
+                self._cache_set(cache_key, synonyms, ttl_seconds=604800)
+            else:
+                logger.warning("Datamuse API returned HTTP %s for %r", resp.status_code, word)
+        except Exception as exc:
+            logger.warning("Datamuse lookup failed for %r: %s", word, exc)
 
-        self._cache_set(cache_key, synonyms, ttl_seconds=604800)  # 1 week
         return synonyms
 
     # ------------------------------------------------------------------
     # Merriam-Webster API (Phase 2, metered)
     # ------------------------------------------------------------------
-    def merriam_webster_definition(self, word: str) -> Optional[DictionaryEntry]:
+    def merriam_webster_definition(self, word: str) -> DictionaryEntry | None:
         """Get definition from Merriam-Webster Collegiate API."""
         if not self.merriam_webster_key or requests is None:
             return None
@@ -342,11 +362,11 @@ class DictionaryManager:
         if cached is not None:
             return DictionaryEntry(**cached)
 
-        entry: Optional[DictionaryEntry] = None
+        entry: DictionaryEntry | None = None
 
         try:
             resp = requests.get(
-                f"https://www.dictionaryapi.com/api/v3/references/collegiate/json/{word}",
+                f"https://www.dictionaryapi.com/api/v3/references/collegiate/json/{quote(word, safe='')}",
                 params={"key": self.merriam_webster_key},
                 timeout=10,
             )
@@ -364,8 +384,8 @@ class DictionaryManager:
                         ),
                         source="merriam_webster",
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Merriam-Webster lookup failed for %r: %s", word, exc)
 
         if entry:
             self._cache_set(cache_key, entry.__dict__, ttl_seconds=604800)
@@ -379,7 +399,7 @@ class DictionaryManager:
         self,
         word: str,
         dictionary: str = "wordnet",
-    ) -> Optional[DictionaryEntry]:
+    ) -> DictionaryEntry | None:
         """Unified definition lookup across dictionaries."""
         if dictionary == "wordnet":
             defn = self.wordnet_definition(word)
@@ -398,7 +418,7 @@ class DictionaryManager:
         self,
         word: str,
         source: str = "wordnet",
-    ) -> List[str]:
+    ) -> list[str]:
         """Unified synonym lookup."""
         if source == "wordnet":
             return self.wordnet_synonyms(word)
@@ -418,7 +438,7 @@ class DictionaryManager:
         self,
         term: str,
         direction: str = "en-ar",
-    ) -> List[str]:
+    ) -> list[str]:
         """Unified EN-AR / AR-EN lookup."""
         if direction == "en-ar":
             return self.wiktionary_en_ar(term)
@@ -430,10 +450,10 @@ class DictionaryManager:
         self,
         text: str,
         max_terms: int = 10,
-    ) -> List[DictionaryEntry]:
+    ) -> list[DictionaryEntry]:
         """Extract difficult terms from text and look up their definitions."""
         words = re.findall(r"\b[A-Za-z]{4,}\b", text)
-        entries: List[DictionaryEntry] = []
+        entries: list[DictionaryEntry] = []
 
         for word in words[:max_terms]:
             entry = self.lookup_definition(word, dictionary="wordnet")

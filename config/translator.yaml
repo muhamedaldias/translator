@@ -16,7 +16,8 @@ pipeline:
 
 arabic:
   diacritics_policy: "remove"  # retain | remove | optional
-  orthography_normalization: true
+  orthography_normalization: true   # analysis-stage normalization
+  normalize_output: false           # lossy alef/ya normalization of FINAL output (opt-in)
   plural_forms: ["zero", "one", "two", "few", "many", "other"]
   gender_agreement: true
   rtl_preservation: true
@@ -84,10 +85,3 @@ book:
   places_registry: "data/places.json"
   manifest: "data/manifest.json"
   output_dir: "outputs"
-
-book:
-  format_support: ["pdf", "docx", "epub", "md", "txt"]
-  consistency_tracking: true
-  character_registry: "data/characters.json"
-  places_registry: "data/places.json"
-  manifest: "data/manifest.json"

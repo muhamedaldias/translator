@@ -13,22 +13,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from src.book_formats import get_handler, BookStructure, BookSegment
+from src.book_formats import BookStructure, get_handler
 from src.pipeline import TranslationPipeline
 
 
 @dataclass
 class CharacterEntry:
     name: str
-    aliases: List[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
     arabic_name: str = ""
-    arabic_aliases: List[str] = field(default_factory=list)
+    arabic_aliases: list[str] = field(default_factory=list)
     pronouns: str = "neutral"
     title: str = ""
     first_chapter: int = 0
@@ -51,8 +50,8 @@ class ChapterManifest:
     output_path: str
     checksum: str
     status: str = "pending"  # pending | translated | reviewed | completed
-    pipeline_id: Optional[str] = None
-    judge_score: Optional[int] = None
+    pipeline_id: str | None = None
+    judge_score: int | None = None
 
 
 class BookTranslator:
@@ -60,20 +59,24 @@ class BookTranslator:
 
     def __init__(
         self,
-        project_root: str = "/data/workspace/projects/translator",
+        project_root: str | None = None,
         target_lang: str = "ar",
     ) -> None:
-        self.project_root = Path(project_root)
+        # Default to the repository root — never a hardcoded foreign path
+        self.project_root = (
+            Path(project_root) if project_root
+            else Path(__file__).resolve().parent.parent
+        )
         self.target_lang = target_lang
 
         self.characters_path = self.project_root / "data" / "characters.json"
         self.places_path = self.project_root / "data" / "places.json"
         self.manifest_path = self.project_root / "data" / "manifest.json"
 
-        self.characters: List[Dict[str, Any]] = []
-        self.places: List[Dict[str, Any]] = []
-        self.manifest: List[ChapterManifest] = []
-        self.dynamic_glossary: List[Dict[str, str]] = []
+        self.characters: list[dict[str, Any]] = []
+        self.places: list[dict[str, Any]] = []
+        self.manifest: list[ChapterManifest] = []
+        self.dynamic_glossary: list[dict[str, str]] = []
 
         self._load_registries()
         self._load_manifest()
@@ -109,35 +112,34 @@ class BookTranslator:
         """Save character and place registries."""
         self.characters_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(self.characters_path, "w", encoding="utf-8") as f:
-            json.dump({"characters": self.characters}, f, ensure_ascii=False, indent=2)
+        self._atomic_write(self.characters_path, {"characters": self.characters})
+        self._atomic_write(self.places_path, {"places": self.places})
 
-        with open(self.places_path, "w", encoding="utf-8") as f:
-            json.dump({"places": self.places}, f, ensure_ascii=False, indent=2)
+    @staticmethod
+    def _atomic_write(path: Path, data: Any) -> None:
+        """Write JSON atomically (tmp + replace) to avoid corruption on crash."""
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        tmp.replace(path)
 
     def _save_manifest(self) -> None:
         """Save translation manifest."""
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(self.manifest_path, "w", encoding="utf-8") as f:
-            json.dump(
-                [
-                    {
-                        "chapter": m.chapter,
-                        "title": m.title,
-                        "source_path": m.source_path,
-                        "output_path": m.output_path,
-                        "checksum": m.checksum,
-                        "status": m.status,
-                        "pipeline_id": m.pipeline_id,
-                        "judge_score": m.judge_score,
-                    }
-                    for m in self.manifest
-                ],
-                f,
-                ensure_ascii=False,
-                indent=2,
-            )
+        self._atomic_write(self.manifest_path, [
+            {
+                "chapter": m.chapter,
+                "title": m.title,
+                "source_path": m.source_path,
+                "output_path": m.output_path,
+                "checksum": m.checksum,
+                "status": m.status,
+                "pipeline_id": m.pipeline_id,
+                "judge_score": m.judge_score,
+            }
+            for m in self.manifest
+        ])
 
     # ------------------------------------------------------------------
     # Book format parsing
@@ -150,11 +152,10 @@ class BookTranslator:
     def reconstruct_book(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
     ) -> None:
         """Reconstruct a book with translated segments."""
-        handler = get_handler(structure.format and structure.title or output_path)
         # Use output_path extension to determine handler
         handler = get_handler(output_path)
         handler.reconstruct(structure, translations, output_path)
@@ -166,23 +167,28 @@ class BookTranslator:
         self,
         chapter_num: int,
         translation: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check translation against character/place registries for consistency."""
-        inconsistencies: List[Dict[str, Any]] = []
-        new_terms: List[Dict[str, str]] = []
+        inconsistencies: list[dict[str, Any]] = []
+        new_terms: list[dict[str, str]] = []
 
-        # Check character names
+        # Alias-vs-canonical check: if a registered Arabic alias appears but
+        # the canonical Arabic name does not, flag the inconsistency.
+        # (Without the source text we cannot know which characters appear
+        # in this chapter, so absence alone is NOT flagged.)
         for char in self.characters:
-            arabic_name = char.get("arabic_name", "")
-            if arabic_name and arabic_name not in translation:
-                # Character mentioned but Arabic name not found — may be inconsistency
-                pass  # Character may not appear in this chapter
-
-        # Check places
-        for place in self.places:
-            arabic_name = place.get("arabic_name", "")
-            if arabic_name and arabic_name not in translation:
-                pass
+            canonical = char.get("arabic_name", "")
+            if not canonical or canonical in translation:
+                continue
+            for alias in char.get("arabic_aliases", []):
+                if alias and alias in translation:
+                    inconsistencies.append({
+                        "type": "character_alias_used",
+                        "name": char.get("name", ""),
+                        "expected": canonical,
+                        "found": alias,
+                    })
+                    break
 
         return {
             "consistent": len(inconsistencies) == 0,
@@ -195,17 +201,32 @@ class BookTranslator:
         chapter_num: int,
         translation: str,
         source_text: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Extract new terms from chapter and update registries."""
         chars_added = 0
         places_added = 0
         terms_added = 0
 
-        # Simple heuristic: find capitalized words as potential names/places
-        names = re.findall(r"\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b", source_text)
+        # Heuristic: capitalized sequences NOT at sentence start and not
+        # common sentence-initial words (avoids registering "The", "He", ...).
+        stopwords = {
+            "The", "A", "An", "In", "On", "At", "It", "He", "She", "They",
+            "We", "I", "My", "His", "Her", "Their", "Our", "This", "That",
+            "These", "Those", "Then", "When", "Where", "What", "Who", "How",
+            "Why", "But", "And", "Or", "If", "As", "Of", "To", "From", "By",
+            "With", "After", "Before", "During", "Chapter", "There", "Here",
+        }
+        existing_names = {c.get("name", "") for c in self.characters}
+        names = []
+        for m in re.finditer(r"\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b", source_text):
+            prefix = source_text[:m.start()].rstrip()
+            if not prefix or prefix[-1] in ".!?":
+                continue  # sentence-initial: likely not a name
+            if m.group(0) not in stopwords:
+                names.append(m.group(0))
 
         for name in names:
-            if name not in [c.get("name", "") for c in self.characters]:
+            if name not in existing_names:
                 self.characters.append({
                     "name": name,
                     "aliases": [],
@@ -217,6 +238,7 @@ class BookTranslator:
                     "description": "",
                 })
                 chars_added += 1
+                existing_names.add(name)
 
         self._save_registries()
 
@@ -241,23 +263,76 @@ class BookTranslator:
     # ------------------------------------------------------------------
     # Chapter Translation
     # ------------------------------------------------------------------
+    def _translate_structured(
+        self,
+        chapter_num: int,
+        source_path: Path,
+        output_path: str,
+        checksum: str,
+        previous_context: str | None = None,
+    ) -> dict[str, Any]:
+        """Translate a structured book file (EPUB/DOCX/PDF) segment by segment."""
+        structure = self.parse_book(str(source_path))
+        translations: dict[str, str] = {}
+        scores: list[int] = []
+        approved_all = True
+        for seg in structure.segments:
+            if seg.segment_type == "code_block":
+                continue  # never translate code
+            result = self.pipeline.run(
+                seg.text, domain_hint="literary", previous_context=previous_context
+            )
+            translations[seg.id] = result["translation"]
+            scores.append(result["judge"].score)
+            approved_all = approved_all and result["approved"]
+        structure.language = self.target_lang
+        self.reconstruct_book(structure, translations, output_path)
+        worst_score = min(scores) if scores else 0
+        manifest_entry = ChapterManifest(
+            chapter=chapter_num,
+            title=source_path.stem,
+            source_path=str(source_path),
+            output_path=output_path,
+            checksum=checksum,
+            status="completed" if approved_all else "reviewed",
+            judge_score=worst_score,
+        )
+        existing = next(
+            (i for i, m in enumerate(self.manifest) if m.chapter == chapter_num), None
+        )
+        if existing is not None:
+            self.manifest[existing] = manifest_entry
+        else:
+            self.manifest.append(manifest_entry)
+        self._save_manifest()
+        return {
+            "chapter": chapter_num,
+            "source_path": str(source_path),
+            "output_path": output_path,
+            "judge_score": worst_score,
+            "approved": approved_all,
+            "segments": len(structure.segments),
+        }
+
     def translate_chapter(
         self,
         chapter_num: int,
-        source_path: str,
-        output_path: Optional[str] = None,
-        previous_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        source_path: str | Path,
+        output_path: str | None = None,
+        previous_context: str | None = None,
+    ) -> dict[str, Any]:
         """Translate a single chapter through the full pipeline."""
         source_path = Path(source_path)
         if not source_path.exists():
             raise FileNotFoundError(f"Source chapter not found: {source_path}")
 
-        source_text = source_path.read_text(encoding="utf-8")
+        structured = source_path.suffix.lower() in (".epub", ".docx", ".pdf")
+        source_text = "" if structured else source_path.read_text(encoding="utf-8")
 
         if output_path is None:
+            ext = source_path.suffix.lower() if structured else ".txt"
             output_path = str(
-                self.project_root / "outputs" / f"chapter_{chapter_num:03d}.ar.txt"
+                self.project_root / "outputs" / f"chapter_{chapter_num:03d}.ar{ext}"
             )
 
         # Check if already translated (resumable)
@@ -268,7 +343,15 @@ class BookTranslator:
                     "chapter": chapter_num,
                     "status": "already_completed",
                     "output_path": m.output_path,
+                    "judge_score": m.judge_score if m.judge_score is not None else 0,
+                    "approved": True,
+                    "iterations": 0,
                 }
+
+        if structured:
+            return self._translate_structured(
+                chapter_num, source_path, output_path, checksum, previous_context
+            )
 
         # Run pipeline
         result = self.pipeline.run(
@@ -298,7 +381,7 @@ class BookTranslator:
             checksum=checksum,
             status="completed" if result["approved"] else "reviewed",
             pipeline_id=result["pipeline_id"],
-            judge_score=result["judge"]["score"],
+            judge_score=result["judge"].score,
         )
 
         # Replace or append
@@ -315,7 +398,7 @@ class BookTranslator:
             "source_path": str(source_path),
             "output_path": output_path,
             "translation": result["translation"],
-            "judge_score": result["judge"]["score"],
+            "judge_score": result["judge"].score,
             "approved": result["approved"],
             "iterations": result["iterations"],
             "consistency": consistency,
@@ -328,9 +411,9 @@ class BookTranslator:
     # ------------------------------------------------------------------
     def translate_book(
         self,
-        chapters: List[str],
-        output_dir: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        chapters: list[str],
+        output_dir: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Translate all chapters of a book sequentially."""
         if output_dir is None:
             output_dir = str(self.project_root / "outputs")
@@ -355,7 +438,17 @@ class BookTranslator:
 
         return results
 
-    def get_status(self) -> Dict[str, Any]:
+    def close(self) -> None:
+        """Close underlying pipeline resources."""
+        self.pipeline.close()
+
+    def __enter__(self) -> BookTranslator:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def get_status(self) -> dict[str, Any]:
         """Get overall book translation status."""
         total = len(self.manifest)
         completed = sum(1 for m in self.manifest if m.status == "completed")
@@ -380,6 +473,7 @@ def main() -> None:
     parser.add_argument("--target", default="ar", help="Target language")
     parser.add_argument("--output", help="Output directory")
     parser.add_argument("--format", default="txt", help="Book format (txt, epub, pdf, docx, md)")
+    parser.add_argument("--project-root", help="Project root for registries/manifest (default: repository root)")
 
     args = parser.parse_args()
 
@@ -395,10 +489,10 @@ def main() -> None:
         # Single file — split by chapter markers (simple heuristic)
         chapters = [str(input_path)]
 
-    translator = BookTranslator(target_lang=args.target)
+    translator = BookTranslator(project_root=args.project_root, target_lang=args.target)
     results = translator.translate_book(chapters, output_dir=args.output)
 
-    print(f"\n=== Book Translation Complete ===")
+    print("\n=== Book Translation Complete ===")
     print(f"Chapters translated: {len(results)}")
     for r in results:
         print(f"  Chapter {r['chapter']}: score={r['judge_score']}, approved={r['approved']}")

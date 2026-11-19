@@ -3,12 +3,12 @@
 Unit tests for the translation pipeline.
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.pipeline import TranslationPipeline, AnalysisResult, TranslationResult
+from src.pipeline import AnalysisResult, TranslationPipeline, TranslationResult
 
 
 class TestTranslationPipeline:

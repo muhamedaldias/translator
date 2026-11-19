@@ -17,20 +17,20 @@ Handles Arabic-specific challenges:
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar
 
 
 class ArabicProcessor:
     """Processor for Arabic-specific linguistic features."""
 
     # Alef variants
-    ALEF_VARIANTS = ["أ", "إ", "آ", "ا"]
+    ALEF_VARIANTS: ClassVar[list[str]] = ["أ", "إ", "آ", "ا"]
 
     # Ya variants
-    YA_VARIANTS = ["ي", "ى"]
+    YA_VARIANTS: ClassVar[list[str]] = ["ي", "ى"]
 
     # Ta-marbuta variants
-    TA_MARBUTA_VARIANTS = ["ة", "ه"]
+    TA_MARBUTA_VARIANTS: ClassVar[list[str]] = ["ة", "ه"]
 
     # Arabic diacritics (tashkīl)
     DIACRITICS = re.compile(
@@ -41,11 +41,14 @@ class ArabicProcessor:
     ARABIC_RANGE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
 
     # 6 Arabic plural forms (CLDR)
-    PLURAL_FORMS = ["zero", "one", "two", "few", "many", "other"]
+    PLURAL_FORMS: ClassVar[list[str]] = ["zero", "one", "two", "few", "many", "other"]
 
     def __init__(self) -> None:
         self.diacritics_policy: str = "remove"  # retain | remove | optional
         self.orthography_normalization: bool = True
+        # Lossy alef/ya normalization belongs in analysis/search, NOT in
+        # final translation output (it would turn أحمد into احمد).
+        self.normalize_output: bool = False
 
     # ------------------------------------------------------------------
     # Detection
@@ -55,7 +58,7 @@ class ArabicProcessor:
         return bool(self.ARABIC_RANGE.search(text))
 
     def contains_arabic(self, text: str) -> bool:
-        """Alias for is_arabic."""
+        """Alias for is_arabic (kept for backward compatibility)."""
         return self.is_arabic(text)
 
     def detect_register(self, text: str) -> str:
@@ -120,21 +123,26 @@ class ArabicProcessor:
     # Plural Forms
     # ------------------------------------------------------------------
     def get_plural_form(self, count: int) -> str:
-        """Get Arabic plural form category for a count (CLDR)."""
-        if count == 0:
-            return "zero"
-        elif count == 1:
-            return "one"
-        elif count == 2:
-            return "two"
-        elif 3 <= count <= 10:
-            return "few"
-        elif 11 <= count <= 99:
-            return "many"
-        else:
-            return "other"
+        """Get Arabic plural form category for a count (CLDR).
 
-    def format_plural(self, singular: str, count: int, dual: Optional[str] = None) -> str:
+        CLDR Arabic rules: zero n=0; one n=1; two n=2;
+        few n%100 in 3..10; many n%100 in 11..99; other otherwise.
+        """
+        n = abs(count)
+        if n == 0:
+            return "zero"
+        elif n == 1:
+            return "one"
+        elif n == 2:
+            return "two"
+        mod = n % 100
+        if 3 <= mod <= 10:
+            return "few"
+        elif 11 <= mod <= 99:
+            return "many"
+        return "other"
+
+    def format_plural(self, singular: str, count: int, dual: str | None = None) -> str:
         """Format Arabic word with correct plural form."""
         form = self.get_plural_form(count)
         if form == "one":
@@ -154,7 +162,7 @@ class ArabicProcessor:
         subject_gender: str,
         object_gender: str,
         verb_form: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check Arabic gender agreement between subject, object, and verb."""
         issues = []
 
@@ -209,19 +217,46 @@ class ArabicProcessor:
     # ------------------------------------------------------------------
     # Code Block Protection
     # ------------------------------------------------------------------
-    def protect_code_blocks(self, text: str) -> tuple[str, List[str]]:
-        """Extract code blocks for protection during translation."""
-        pattern = r"`[^`]+`|<[^>]+>|\{\{[^}]+\}\}|\$\{[^}]+\}"
-        blocks = re.findall(pattern, text)
-        protected = re.sub(pattern, "___CODE_BLOCK___", text)
+    # Fenced blocks first (multi-line), then inline code/tags/placeholders.
+    _CODE_PATTERN = re.compile(
+        r"```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`|<[^>\n]+>|\{\{[^}]+\}\}|\$\{[^}]+\}"
+    )
+
+    def protect_code_blocks(self, text: str) -> tuple[str, list[str]]:
+        """Extract code blocks (fenced and inline) for protection.
+
+        Each block gets an indexed marker so restoration is
+        order-independent even if a translation reorders markers.
+        """
+        blocks: list[str] = []
+        base = "___CODE_BLOCK"
+        while f"{base}_0___" in text:
+            base += "_"
+
+        def _sub(match: re.Match[str]) -> str:
+            idx = len(blocks)
+            blocks.append(match.group(0))
+            return f"{base}_{idx}___"
+
+        protected = self._CODE_PATTERN.sub(_sub, text)
         return protected, blocks
 
     def restore_code_blocks(
-        self, text: str, blocks: List[str]
+        self, text: str, blocks: list[str]
     ) -> str:
-        """Restore code blocks after translation."""
-        for block in blocks:
-            text = text.replace("___CODE_BLOCK___", block, 1)
+        """Restore code blocks after translation (order-independent).
+
+        Selects the marker base whose complete index set is present, so a
+        literal marker occurring in the source cannot hijack restoration.
+        """
+        if not blocks:
+            return text
+        candidates = set(re.findall(r"(_+CODE_BLOCK_*)_\d+___", text))
+        for base in sorted(candidates, key=len, reverse=True):
+            if all(f"{base}_{i}___" in text for i in range(len(blocks))):
+                for i, block in enumerate(blocks):
+                    text = text.replace(f"{base}_{i}___", block)
+                return text
         return text
 
 

@@ -7,7 +7,7 @@ and suitable for translating books, technical documentation, UI/strings, and cod
 ## Project Structure
 
 ```
-/data/workspace/projects/translator/
+translator/
 ├── README.md
 ├── AGENTS.md                  # Project-wide rules for coding agents
 ├── CLAUDE.md                  # Claude Code specific rules
@@ -29,17 +29,31 @@ and suitable for translating books, technical documentation, UI/strings, and cod
 
 ```bash
 # From within your coding agent project:
-npx skills add /data/workspace/projects/translator/skills/translator-skill
+npx skills add ./skills/translator-skill
 ```
 
 Or manually copy the skill directory to:
 - `.claude/skills/` (Claude Code)
 - `.agents/skills/` (Codex, OpenCode)
 
-### Run the pipeline
+### Install dependencies
 
 ```bash
-python src/pipeline.py --source input.txt --target ar --output output_ar.txt
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+# Optional: LLM providers and book formats
+pip install openai ebooklib beautifulsoup4 python-docx pypdf
+```
+
+### Run the pipeline
+
+Real translation requires an LLM provider. Without one, the pipeline runs
+in PLACEHOLDER mode (glossary substitution only) and warns loudly — that
+output is NOT a translation.
+
+```bash
+export OPENAI_API_KEY=sk-...   # or ANTHROPIC_API_KEY
+python src/pipeline.py --source input.txt --target ar --output output_ar.txt --use-llm
 ```
 
 ### Translate a book
@@ -73,6 +87,18 @@ Each agent is role-specialized. The system injects glossary at every stage and u
 - RTL preservation and code-block protection
 - Diacritics policy (configurable)
 
+## Current Limitations
+
+- Register detection, diacritization, and transliteration are heuristic
+  placeholders (documented in `src/arabic.py`).
+- Cross-chapter consistency checks are limited to alias-vs-canonical
+  name checks against the registries.
+- PDF output is text-only (`.txt`); PDF input is extraction-only.
+- EPUB reconstruction produces a simplified EPUB (original images/CSS
+  are not preserved).
+- COMET-MQM requires `pip install unbabel-comet` and a model download;
+  without it, evaluation falls back to chrF/AL-BLEU.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
