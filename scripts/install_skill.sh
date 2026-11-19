@@ -3,8 +3,10 @@
 
 set -euo pipefail
 
-SKILL_SOURCE="/data/workspace/projects/translator/skills/translator-skill"
-REFERENCE_SOURCE="/data/workspace/projects/translator/skills/reference-skills"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+SKILL_SOURCE="$PROJECT_ROOT/skills/translator-skill"
+REFERENCE_SOURCE="$PROJECT_ROOT/skills/reference-skills"
 
 echo "=== Installing Multi-Agent Translation Skill ==="
 
