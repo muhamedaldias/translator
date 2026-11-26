@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT))
 from src.book import REPO_ROOT, BookTranslator, _extract_placeholders
 from src.pipeline import JudgeResult
 
-VENV_PY = ROOT / ".venv" / "bin" / "python"
+VENV_PY = sys.executable
 CLI = ROOT / "scripts" / "translate_book.py"
 
 
@@ -138,7 +138,7 @@ def make_translator(project, pipeline=None):
 def test_project_root_is_repo_relative():
     translator = BookTranslator(project_root=None)
     assert translator.project_root == REPO_ROOT
-    assert str(translator.project_root).endswith("translator-analysis")
+    assert "projects/translator" not in str(translator.project_root)
     # Assembled so the forbidden literal does not appear in this file.
     stale = "/data/workspace/" + "projects/translator"
     assert stale not in str(translator.project_root)

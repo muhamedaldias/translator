@@ -30,7 +30,7 @@ from src.book_formats import (
     list_supported_formats,
 )
 
-VENV_PY = ROOT / ".venv" / "bin" / "python"
+VENV_PY = sys.executable
 
 
 # ------------------------------------------------------------------

@@ -199,7 +199,13 @@ class DictionaryManager:
         synonyms: List[str] = []
 
         # NLTK WordNet
-        if hasattr(self.wordnet, "synsets"):
+        # LazyCorpusLoader raises LookupError on attribute access when the
+        # optional corpus is absent; degrade gracefully instead of crashing.
+        try:
+            has_wordnet = hasattr(self.wordnet, "synsets")
+        except Exception:
+            has_wordnet = False
+        if has_wordnet:
             try:
                 from nltk.corpus import wordnet as wn  # type: ignore
 
@@ -233,7 +239,13 @@ class DictionaryManager:
 
         definition: Optional[str] = None
 
-        if hasattr(self.wordnet, "synsets"):
+        # LazyCorpusLoader raises LookupError on attribute access when the
+        # optional corpus is absent; degrade gracefully instead of crashing.
+        try:
+            has_wordnet = hasattr(self.wordnet, "synsets")
+        except Exception:
+            has_wordnet = False
+        if has_wordnet:
             try:
                 from nltk.corpus import wordnet as wn  # type: ignore
 
