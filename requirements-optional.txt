@@ -1,0 +1,10 @@
+# Optional extras: install only the formats/integrations you need.
+# None of these are required for translation or for the default test suite.
+ebooklib>=0.17
+beautifulsoup4>=4.12
+python-docx>=1.0
+pypdf>=3.17
+# Deprecated provider SDKs: the host coding agent translates, these are unused
+# on the default path and are listed only for legacy integrations.
+openai>=1.0
+anthropic>=0.20

@@ -1,68 +1,50 @@
-# Claude Code Rules — Multi-Agent Translation System (EN ↔ Arabic)
+# Claude Code Rules — Portable Translation Skill Pack
 
-This file configures Claude Code for the translator project. It defines project-wide behavior,
-translation procedures, and agent invocation patterns.
+This file configures Claude Code for the key-free EN ↔ Arabic translation skill pack. Claude Code is the host agent: its own model performs every translation stage. No provider key is used or requested.
 
-## Project Context
+## Project context
 
-- **Project:** Multi-Agent Translation System (EN ↔ Arabic)
-- **Root:** `/data/workspace/projects/translator/`
-- **Pipeline:** Analysis → Translator → Post-editor → Reviewer → Judge
-- **Evaluation:** COMET-MQM (primary), chrF, AL-BLEU, TSR
+- **Architecture:** portable core (`skills/`, `agents/`, `docs/`) plus thin host adapters installed by `scripts/install.sh`.
+- **Who translates:** the host agent — here, Claude Code itself. Python prepares a brief and validates the result; it never produces target text.
+- **Seven agents:** Analysis → Translator → Post-editor → Reviewer → Editor → Judge → Consistency.
+- **Quality:** MQM gate, score ≥ 85, at most 3 revision rounds, approved terminology injected at every stage.
 
-## Translation Procedures
+## Translation procedure
 
-### When translating text (EN ↔ Arabic):
+When asked to translate English ↔ Arabic:
 
-1. **Invoke the translator skill** — lazy-load `skills/translator-skill/`
-2. **Run Analysis Agent first** — detect register (MSA/dialect), domain, entities, gender context
-3. **Inject glossary** — load `data/glossary.tbx` and inject into every agent stage
-4. **Run pipeline sequentially** — never parallelize agent stages for the same segment
-5. **Apply quality gate** — LLM Judge score ≥ 85 required; max 3 iterations
-6. **Preserve formatting** — code blocks, placeholders, XML/HTML tags, RTL markers unchanged
+1. **Load the skill** from `.claude/skills/translator` (or the `/translate` command installed with the plugin). Load it only for translation work.
+2. **Use the deterministic brief** — let the Python layer supply context, approved terms, protected spans and the style profile before drafting.
+3. **Run the seven agents in sequence.** Each is a role-specialized prompt in `agents/` and `skills/`; do not collapse or parallelize their responsibilities.
+4. **Never translate protected spans** — code, `{{placeholders}}`, tags and IDs remain verbatim. Preserve RTL markers and paragraph structure.
+5. **Apply the MQM gate** — Reviewer then Judge; a score below 85 returns the text for revision, capped at three rounds.
+6. **Validate and deliver** — check the host output against the brief, then write the master Markdown and export EPUB/DOCX or optional PDF if requested.
+7. **If no translation is produced, say so explicitly.** Never invent target text.
+8. **Do not ask for, set or generate an API key or provider credential.** There is nothing to configure for translation. `src/llm_client.py` is deprecated and must not be called from the default path.
 
-### Arabic-Specific Rules
+## Arabic rules
 
-- Default target: Modern Standard Arabic (MSA) for written text
-- Dialect only when explicitly requested (Egyptian, Gulf, Levantine)
-- Normalize orthography (alef/ya/ta-marbuta variants) before processing
-- Handle 6 Arabic plural forms (zero/one/two/few/many/other)
-- Gender agreement: verb-subject, noun-adjective, definiteness
-- Broken plurals agree in gender + definiteness only
-- Diacritics policy per `config/translator.yaml`
+- MSA for written text; Egyptian, Gulf or Levantine only on explicit request.
+- Root-and-pattern morphology, six plural forms, gender and definiteness agreement, broken-plural agreement.
+- Normalize alef/ya/ta-marbuta variants; follow the configured diacritics policy.
+- Resolve named entities against the term base and style profile; transliterate or translate accordingly.
 
-## Agent Invocation Pattern
-
-```
-skills/translator-skill/tools/analysis.py    → structured analysis JSON
-skills/translator-skill/tools/translate.py   → draft translation
-skills/translator-skill/tools/postedit.py    → Arabic grammar correction
-skills/translator-skill/tools/review.py      → MQM-style critique
-skills/translator-skill/tools/judge.py       → quality gate (0–100)
-```
-
-## Skill Installation
+## Installation for this host
 
 ```bash
-# Install into current project:
-cp -r /data/workspace/projects/translator/skills/translator-skill .claude/skills/translator
-
-# Or via npx:
-npx skills add /data/workspace/projects/translator/skills/translator-skill
+bash scripts/install.sh --host claude-code          # plugin manifest, .claude/skills, .claude/agents, /translate command
+bash scripts/install.sh --host claude-code --dry-run
+bash scripts/install.sh --help
 ```
 
-## Commands
+The Claude Code adapter adds `.claude-plugin/plugin.json`, `.claude/skills/`, `.claude/agents/` and `commands/translate.md`. Other supported hosts are `codex`, `opencode`, `hermes` and `generic`. `scripts/install_skill.sh` is a compatibility shim only.
+
+## Commands for contributors
 
 ```bash
-# Translate a single file
-python src/pipeline.py --source input.txt --target ar --output output_ar.txt
-
-# Translate a book
-python scripts/translate_book.py --input book.epub --target ar --output book_ar.epub
-
-# Run evaluation
-python src/evaluation.py --reference ref_ar.txt --hypothesis hyp_ar.txt
-
-# Run tests
-pytest tests/ -v
+python -m pytest tests/ -v
+python scripts/validate_pack.py
+python -m pytest tests/test_docs_consistency.py -v
 ```
+
+All paths are repository-relative. Work through pull requests on protected `main`; CI must pass before merge.

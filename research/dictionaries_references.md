@@ -1,6 +1,6 @@
 # Authoritative English Language References for Translation Agents & Skills
 
-**Project:** `/data/workspace/projects/translator`
+**Project:** `translator` (repository root)
 **Report file:** `research/dictionaries_references.md`
 **Prepared:** 2026-11-04
 **Scope:** English dictionaries, lexical databases, bilingual (EN-AR) dictionaries, thesauri, corpora, style guides, programmatic APIs/datasets, and translation-theory books relevant to powering agent-based translation skills.

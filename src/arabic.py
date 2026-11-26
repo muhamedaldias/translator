@@ -43,6 +43,17 @@ class ArabicProcessor:
     # 6 Arabic plural forms (CLDR)
     PLURAL_FORMS = ["zero", "one", "two", "few", "many", "other"]
 
+    # Verbatim spans that must never be translated. Alternation order matters:
+    # the double-brace placeholder and the backtick span are matched *before*
+    # their XML/JSON-like contents so nested-looking syntax stays one span.
+    PROTECTED_SPAN_RE = re.compile(
+        r"\{\{[^{}]*\}\}"     # {{placeholder}}
+        r"|`[^`]*`"           # `inline code`
+        r"|\$\{[^}]*\}"       # ${variable}
+        r"|<[^<>]+>"          # <xml tag attr="...">
+        r"|\{[^{}]*\}"        # {"json": "like span"}
+    )
+
     def __init__(self) -> None:
         self.diacritics_policy: str = "remove"  # retain | remove | optional
         self.orthography_normalization: bool = True
@@ -63,8 +74,10 @@ class ArabicProcessor:
         # Heuristic: MSA tends to use more formal vocabulary and case endings
         # Dialect tends to use clitics, circumfix negation, etc.
         # This is a placeholder — real implementation uses trained models.
-        dialect_markers = ["شو", "كيفك", "ächbar", "يا", "wallah", "يا ريت"]
-        msa_markers = ["و", "في", "من", "إلى", "على", "عن", "مع", "بال", "لقد", "قد"]
+        dialect_markers = [
+            "شو", "كيفك", "أخبارك", "إيه", "يا ريت", "wallah", "älhamdulillah",
+        ]
+        msa_markers = ["لقد", "قد", "إلى", "على", "من", "في", "هذا", "يمكن", "الذي"]
 
         dialect_count = sum(1 for m in dialect_markers if m in text)
         msa_count = sum(1 for m in msa_markers if m in text)
@@ -100,6 +113,18 @@ class ArabicProcessor:
     def remove_diacritics(self, text: str) -> str:
         """Remove Arabic diacritics (tashkīl)."""
         return self.DIACRITICS.sub("", text)
+
+    def has_diacritics(self, text: str) -> bool:
+        """Return True when the text contains Arabic diacritics/tatweel."""
+        return bool(self.DIACRITICS.search(text))
+
+    def extract_protected_spans(self, text: str) -> List[str]:
+        """Return every verbatim placeholder/code/tag/JSON span, in order.
+
+        A backtick span swallows any XML-looking text inside it, so each
+        occurrence is returned exactly once and can be mapped 1:1 to a token.
+        """
+        return self.PROTECTED_SPAN_RE.findall(text or "")
 
     def add_diacritics(self, text: str) -> str:
         """Add diacritics (placeholder — requires trained model)."""
@@ -211,9 +236,8 @@ class ArabicProcessor:
     # ------------------------------------------------------------------
     def protect_code_blocks(self, text: str) -> tuple[str, List[str]]:
         """Extract code blocks for protection during translation."""
-        pattern = r"`[^`]+`|<[^>]+>|\{\{[^}]+\}\}|\$\{[^}]+\}"
-        blocks = re.findall(pattern, text)
-        protected = re.sub(pattern, "___CODE_BLOCK___", text)
+        blocks = self.extract_protected_spans(text)
+        protected = self.PROTECTED_SPAN_RE.sub("___CODE_BLOCK___", text)
         return protected, blocks
 
     def restore_code_blocks(

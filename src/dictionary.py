@@ -75,8 +75,8 @@ class DictionaryManager:
 
         # Loaded resources
         self.wordnet: Optional[Any] = None
-        self.wiktionary_en_ar: Dict[str, List[str]] = {}
-        self.roget_synonyms: Dict[str, List[str]] = {}
+        self._wiktionary_en_ar_data: Dict[str, List[str]] = {}
+        self._roget_synonyms_data: Dict[str, List[str]] = {}
 
         self._load_resources()
 
@@ -169,7 +169,7 @@ class DictionaryManager:
         for path in candidates:
             if path.exists():
                 with open(path, "r", encoding="utf-8") as f:
-                    self.wiktionary_en_ar = json.load(f)
+                    self._wiktionary_en_ar_data = json.load(f)
                 return
 
     def _load_roget(self) -> None:
@@ -183,7 +183,7 @@ class DictionaryManager:
         for path in candidates:
             if path.exists():
                 with open(path, "r", encoding="utf-8") as f:
-                    self.roget_synonyms = json.load(f)
+                    self._roget_synonyms_data = json.load(f)
                 return
 
     # ------------------------------------------------------------------
@@ -257,13 +257,17 @@ class DictionaryManager:
     # Wiktionary EN-AR
     # ------------------------------------------------------------------
     def wiktionary_en_ar(self, word: str) -> List[str]:
-        """Get EN-AR translations from Wiktionary."""
+        """Get EN-AR translations from Wiktionary.
+
+        The backing map is ``_wiktionary_en_ar_data`` so this method name is
+        never shadowed by an instance attribute of the same name.
+        """
         cache_key = f"wk:en-ar:{word.lower()}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        translations = self.wiktionary_en_ar.get(word.lower(), [])
+        translations = self._wiktionary_en_ar_data.get(word.lower(), [])
 
         self._cache_set(cache_key, translations)
         return translations
@@ -277,7 +281,7 @@ class DictionaryManager:
 
         # Reverse lookup
         translations: List[str] = []
-        for en_word, ar_translations in self.wiktionary_en_ar.items():
+        for en_word, ar_translations in self._wiktionary_en_ar_data.items():
             if word.lower() in [t.lower() for t in ar_translations]:
                 translations.append(en_word)
 
@@ -288,13 +292,16 @@ class DictionaryManager:
     # Roget's Thesaurus
     # ------------------------------------------------------------------
     def roget_synonyms(self, word: str) -> List[str]:
-        """Get concept-based synonyms from Roget's Thesaurus."""
+        """Get concept-based synonyms from Roget's Thesaurus.
+
+        Backing map: ``_roget_synonyms_data`` (no method/attribute collision).
+        """
         cache_key = f"roget:syn:{word.lower()}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        synonyms = self.roget_synonyms.get(word.lower(), [])
+        synonyms = self._roget_synonyms_data.get(word.lower(), [])
 
         self._cache_set(cache_key, synonyms)
         return synonyms

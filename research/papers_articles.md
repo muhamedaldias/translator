@@ -320,7 +320,7 @@ Note: Dedicated open-source "agentic translation" repos are still emerging as of
 
 ## 10. Concrete Architectural Recommendations
 
-Based on the literature review, here are concrete recommendations for building an agentic translation system in `/data/workspace/projects/translator`.
+Based on the literature review, here are concrete recommendations for building an agentic translation system in the `translator` repository.
 
 ### Recommended Architecture
 

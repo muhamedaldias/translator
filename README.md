@@ -1,77 +1,86 @@
-# Multi-Agent Translation System (EN ↔ Arabic)
+# Portable Translation Skill Pack (EN ↔ Arabic)
 
-A professional, role-specialized multi-agent translation system for English ↔ Arabic translation.
-Designed to work with any coding agent (Claude Code, Codex, OpenCode, OpenHands, Aider, etc.)
-and suitable for translating books, technical documentation, UI/strings, and code.
+A professional, portable skill pack that adds a high-quality English ↔ Arabic translation workflow to any coding agent. The host agent's own model performs every translation stage; there is **no API key, no provider account and no network dependency** in the translation path.
 
-## Project Structure
+## Why it is different
 
-```
-/data/workspace/projects/translator/
-├── README.md
-├── AGENTS.md                  # Project-wide rules for coding agents
-├── CLAUDE.md                  # Claude Code specific rules
-├── plan.md                    # Implementation plan
-├── research/                  # Deep research reports
-├── skills/                    # SKILL.md skills for coding agents
-├── agents/                    # Agent prompt definitions
-├── src/                       # Core implementation (Python)
-├── data/                      # Glossaries, character/place registries
-├── tests/                     # Unit + integration tests
-├── config/                    # Configuration (translator.yaml)
-├── scripts/                   # Install + CLI scripts
-└── outputs/                   # Translated output (gitignored)
-```
+- **Host agent translates.** Claude Code, Codex, OpenCode, Hermes or a generic agent supplies the model; the pack supplies the method.
+- **No API key anywhere.** Nothing to provision, nothing to export, no secret to rotate and no per-call provider bill from this repository.
+- **Python is deterministic support only.** It builds a context-rich brief, protects placeholders, checks the term base, validates host output, converts formats and scores results. It never invents a translation.
+- **Seven role-specialized agents** run in sequence, with approved terminology injected at every stage.
+- **An explicit MQM gate** accepts or returns a translation (score ≥ 85, at most 3 revision rounds).
+- **Professional deliverables:** a formatted Markdown master with EPUB and DOCX export and optional PDF.
 
-## Quick Start
+## Install
 
-### Install as a coding agent skill
+The installer maps the portable core into the host's native layout. It has no global side effects and supports a preview:
 
 ```bash
-# From within your coding agent project:
-npx skills add /data/workspace/projects/translator/skills/translator-skill
+bash scripts/install.sh --host claude-code          # plugin manifest, .claude/skills, .claude/agents, /translate command
+bash scripts/install.sh --host codex                # .agents/skills + .agents/agents
+bash scripts/install.sh --host opencode             # .agents/...
+bash scripts/install.sh --host hermes               # ~/.hermes/skills
+bash scripts/install.sh --host generic --dest .     # AGENTS.md + skills in a chosen directory
+bash scripts/install.sh --dry-run --host claude-code
+bash scripts/install.sh --help
 ```
 
-Or manually copy the skill directory to:
-- `.claude/skills/` (Claude Code)
-- `.agents/skills/` (Codex, OpenCode)
+For Claude Code the pack also ships a plugin manifest (`.claude-plugin/plugin.json`) and a `/translate` command (`commands/translate.md`). For Hermes it installs under `~/.hermes/skills/`. The generic path places a portable `AGENTS.md` and the skills in a directory you choose. `scripts/install_skill.sh` is kept as a compatibility shim; prefer `scripts/install.sh`.
 
-### Run the pipeline
+## The seven agents
+
+| Agent | Responsibility |
+|-------|----------------|
+| Analysis | Establish genre, audience, register, domain, entities, gender context and document structure. |
+| Translator | Produce the first target-language draft from the source and the brief. |
+| Post-editor | Repair Arabic grammar, morphology, agreement and orthography. |
+| Reviewer | Record MQM errors with category and severity, plus suggested fixes. |
+| Editor | Apply review findings and produce a revised target text. |
+| Judge | Apply the MQM gate: approve or send back for another round. |
+| Consistency | Keep names, places and terminology coherent across book chapters. |
+
+Every stage receives the same brief and the same approved term base. The workflow never translates code, placeholders, tags or identifiers, and never fabricates target text when a host translation is missing.
+
+## How a translation runs
+
+1. **Brief** — the deterministic layer extracts context, approved terms and verbatim spans into a translation brief.
+2. **Draft and refine** — the host agent executes the seven agents in sequence using the brief and the bundled prompts.
+3. **Gate** — the Reviewer and Judge apply the MQM rubric. A score below 85 returns the text for revision, up to three rounds.
+4. **Validate** — the deterministic layer checks placeholders, terminology and structure; a missing placeholder is a named failure, never a silent pass.
+5. **Deliver** — the approved text becomes the master Markdown, then an EPUB/DOCX edition and optional PDF.
+
+## Quality and Arabic handling
+
+- MSA is the default for written Arabic; a dialect is used only when explicitly requested.
+- Root-and-pattern morphology, six plural forms, gender and definiteness agreement, and alef/ya/ta-marbuta normalization are handled in the prompts and checks.
+- RTL layout, paragraph structure and the diacritics policy follow a bundled style profile.
+- Automatic metrics are optional and degrade honestly: no model download is required to run the pack or its tests.
+
+## Repository layout
+
+```
+README.md, AGENTS.md, CLAUDE.md, plan.md   # user- and agent-facing docs
+GLOSSARY.md                                # canonical domain terms
+docs/adr/                                  # architecture decision records
+docs/style-guide.md, docs/translation-brief-template.md
+skills/                                    # portable core: skills and seven agent prompts
+agents/                                    # role definitions
+scripts/install.sh                         # host installer
+config/translator.yaml                     # deterministic settings
+src/                                       # brief, validation, term base, formats, scoring
+tests/                                     # offline pytest suite
+```
+
+All paths are relative to the repository root.
+
+## Develop and verify
 
 ```bash
-python src/pipeline.py --source input.txt --target ar --output output_ar.txt
+python -m pytest tests/ -v
+python scripts/validate_pack.py
 ```
 
-### Translate a book
-
-```bash
-python scripts/translate_book.py --input book.epub --target ar --output book_ar.epub
-```
-
-## Pipeline Architecture
-
-```
-Analysis Agent → Translator Agent → Post-editor Agent → Reviewer Agent → LLM Judge Agent
-```
-
-Each agent is role-specialized. The system injects glossary at every stage and uses a quality gate (LLM Judge, threshold ≥ 85) with up to 3 iterations.
-
-## Evaluation
-
-- **COMET-MQM** (primary) — highest correlation with human judgments
-- **chrF** (secondary) — robust for Arabic morphology
-- **AL-BLEU** — Arabic-specific morphologically-aware BLEU
-- **TSR** — Term Success Rate for glossary adherence
-
-## Arabic-Specific Features
-
-- MSA default for written text; dialect support on request
-- Root-and-pattern morphology handling
-- 6 Arabic plural forms (zero/one/two/few/many/other)
-- Gender agreement (verb-subject, noun-adjective, definiteness)
-- Orthography normalization (alef/ya/ta-marbuta variants)
-- RTL preservation and code-block protection
-- Diacritics policy (configurable)
+CI runs the test suite, pack validation and a key-free smoke test on every push and pull request. `main` is protected: changes require a pull request and passing status checks, force pushes and deletions are blocked, and there is no admin bypass. Direct pushes to `main` are not part of the workflow.
 
 ## License
 

@@ -1,7 +1,11 @@
 # Translator System Configuration
+#
+# All filesystem paths in this file are relative to the repository root.
+# No API key is required: the host coding agent performs every translation
+# stage and the Python layer is a deterministic support layer only.
 
 project:
-  name: "Multi-Agent Translation System EN↔AR"
+  name: "Multi-Agent Translation System EN<->AR"
   version: "1.0.0"
   source_lang: "en"
   target_lang: "ar"
@@ -42,6 +46,7 @@ skills:
       - "mozilla_arabic_style_guide"
     offline: true
   datamuse_synonyms:
+    # Optional, keyless network skill; never used in the default translation path.
     api_url: "https://api.datamuse.com/words"
     offline: false
     cache_enabled: true
@@ -55,7 +60,8 @@ evaluation:
 glossary:
   format: "tbx"
   path: "data/glossary.tbx"
-  injection_stages: ["analysis", "translate", "postedit", "review", "judge"]
+  # Inject the glossary at all seven sequential stages.
+  injection_stages: ["analysis", "translator", "postedit", "reviewer", "editor", "judge", "consistency"]
 
 dictionaries:
   data_dir: "data/dictionaries"
@@ -64,30 +70,28 @@ dictionaries:
   wiktionary_enabled: true
   roget_enabled: true
   datamuse_enabled: true
+  # Metered dictionaries are optional and disabled by default; never required.
   merriam_webster_key: null
   collins_key: null
   oxford_app_id: null
   oxford_app_key: null
 
+# DEPRECATED / DISABLED — do not enable this section.
+# The host coding agent performs every translation stage; src/llm_client.py is
+# deprecated and is never called on the default path. These keys are retained
+# only so older configurations keep loading. No API key is needed or requested.
 llm:
   enabled: false
-  provider: "openai"
+  provider: null
   model: null
-  api_key: null
+  api_key: null  # deprecated: the host coding agent performs translation
   temperature: 0.3
   max_tokens: 2000
 
 book:
-  format_support: ["txt", "md", "epub", "docx", "pdf"]
+  format_support: ["md", "txt", "epub", "docx", "pdf"]
   consistency_tracking: true
   character_registry: "data/characters.json"
   places_registry: "data/places.json"
   manifest: "data/manifest.json"
   output_dir: "outputs"
-
-book:
-  format_support: ["pdf", "docx", "epub", "md", "txt"]
-  consistency_tracking: true
-  character_registry: "data/characters.json"
-  places_registry: "data/places.json"
-  manifest: "data/manifest.json"

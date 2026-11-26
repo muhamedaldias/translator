@@ -1,66 +1,60 @@
 # Project-Wide Rules for Coding Agents
 
-This file provides project-wide rules for all coding agents (Claude Code, Codex, OpenCode, OpenHands, Aider, etc.)
-working on the Multi-Agent Translation System (EN ↔ Arabic).
+Rules for every coding agent working in this repository. This project is a portable, key-free English ↔ Arabic translation skill pack — not a hosted translation service.
 
-## Project Overview
+## Project overview
 
-- **Project:** Multi-Agent Translation System (EN ↔ Arabic)
-- **Location:** `/data/workspace/projects/translator/`
-- **Goal:** A role-specialized, quality-gated translation pipeline for English ↔ Arabic
-- **Target users:** Coding agents and book translation workflows
+- **What:** a portable core of skills, seven agent prompts and documentation, mapped into any host agent by an installer.
+- **Who translates:** the host agent's own model performs all seven stages. Python never generates target text.
+- **No credentials:** there is no API key, provider account or network request in the translation path. Do not add one.
+- **Quality:** an explicit MQM gate (score ≥ 85, at most 3 revision rounds) with approved terminology injected at every stage.
 
-## Core Principles
+## Core principles
 
-1. **Sequential pipeline over parallel generation** — terminology consistency is paramount
-2. **Glossary injected at every stage** — improves term success rate
-3. **Role specialization** — each agent has one clear responsibility
-4. **Arabic-first quality** — COMET-MQM, chrF, AL-BLEU; BLEU alone is insufficient
-5. **Never translate code blocks** — placeholders, XML/HTML tags, IDs remain unchanged
-6. **MSA default** — Modern Standard Arabic for written text unless dialect is explicitly requested
+1. **Host-agent intelligence, deterministic support.** Python builds the brief, protects placeholders, checks the term base, validates output, converts formats and scores. It does not translate.
+2. **Seven sequential agents.** Analysis → Translator → Post-editor → Reviewer → Editor → Judge → Consistency. Do not parallelize stages for the same segment.
+3. **Brief in, validation out.** Consumption of a translation brief and validation of host-produced text are the only contract with the model layer.
+4. **Never translate protected spans.** Code blocks, placeholders, XML/HTML tags and identifiers stay verbatim; a missing placeholder is a named failure.
+5. **Explicit absence.** If no host translation is available, say so. Never emit a stub or fabricated translation.
+6. **MSA default.** Modern Standard Arabic for written text; a dialect only on explicit request.
+7. **Markdown master.** Well-formatted Markdown is the authoritative deliverable; EPUB/DOCX/PDF are exports.
 
-## Agent Roles
+## The seven agents
 
 | Agent | Responsibility |
-|-------|---------------|
-| Analysis | Register detection, domain, entities, gender context, orthography normalization |
-| Translator | Initial draft translation with glossary injection |
-| Post-editor | Arabic grammar, morphology, gender/plural agreement, diacritics |
-| Reviewer | MQM-style structured critique (accuracy, fluency, style, terminology, coherence) |
-| Editor | Apply reviewer feedback to produce revised draft |
-| Judge | Quality gate (0–100 rubric), approve or route back (max 3 iterations) |
-| Consistency | Cross-chapter coherence for books (character registry, dynamic glossary) |
+|-------|----------------|
+| Analysis | Genre, audience, register, domain, entities, gender context, document structure. |
+| Translator | First target-language draft from the source and the brief. |
+| Post-editor | Arabic grammar, morphology, gender/plural agreement, orthography. |
+| Reviewer | MQM-style error spans, categories, severity and suggested fixes. |
+| Editor | Applies review findings to produce the revised target text. |
+| Judge | MQM gate decision: approve or return for another round. |
+| Consistency | Character, place and terminology coherence across chapters. |
 
-## Code Conventions
+## Arabic rules
 
-- Language: Python 3.10+
-- Type hints required on all public functions
-- Docstrings in Google style
-- Black formatting, isort import ordering
-- Tests in `tests/` using pytest
-- Configuration in `config/translator.yaml`
+- Default register MSA; Egyptian, Gulf or Levantine only when explicitly requested.
+- Handle root-and-pattern morphology and the six plural forms (zero, one, two, few, many, other).
+- Gender and definiteness agreement, including broken plurals; normalize alef/ya/ta-marbuta variants.
+- Preserve RTL markers, paragraph structure and code blocks; follow the configured diacritics policy.
+- Transliterate or translate named entities according to the term base and style profile.
 
-## File Handling
+## Contributor rules
 
-- Preserve RTL markers, paragraph structure, code blocks, placeholders
-- Arabic orthography normalization before processing
-- 6 Arabic plural forms (zero/one/two/few/many/other)
-- Glossary format: TBX (ISO 30042) / UTX (AAMT)
+- Use paths relative to the repository root. The former absolute workspace path is retired; do not reintroduce it.
+- Never add a credential, credential placeholder or setup instruction for a translation provider to docs, config or code.
+- Every `SKILL.md` and `agents/*.md` starts with YAML frontmatter containing `name` and `description`.
+- `GLOSSARY.md` holds canonical domain terms only — no implementation detail. Decisions belong in `docs/adr/` using context, decision, consequences and alternatives.
+- Keep the portable core host-agnostic; host-specific behavior lives in thin adapters in the installer.
+- Prefer offline resources. Optional extras are imported lazily and must never break a clean install.
+- All documentation must describe the current key-free architecture. Run the docs consistency test after editing docs.
 
-## Testing
+## Testing and quality gates
 
-Run all tests:
 ```bash
-pytest tests/
+python -m pytest tests/ -v
+python scripts/validate_pack.py
+python -m pytest tests/test_docs_consistency.py -v
 ```
 
-Run specific test:
-```bash
-pytest tests/test_arabic_morphology.py -v
-```
-
-## Quality Thresholds
-
-- LLM Judge score ≥ 85 for approval
-- Glossary adherence (TSR) ≥ 95%
-- Max 3 iterations per segment
+CI runs pytest, pack validation and a key-free smoke test. `main` is protected: work happens on branches through pull requests with required status checks; force pushes, deletions and admin bypass are blocked.

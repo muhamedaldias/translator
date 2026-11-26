@@ -1,55 +1,43 @@
-# reference-skills — SKILL.md
+---
+name: reference-skills
+description: Offline EN↔AR reference procedures for the translation workflow — dictionary, synonym, term-base and style-guide lookups. Use when an agent needs lexical evidence or approved terminology without network access.
+---
 
-**Name:** reference-skills
-**Version:** 1.0.0
-**Description:** Reference skills for the Multi-Agent Translation System — dictionaries, thesauri, style guides
-**Author:** Kilo
-**License:** MIT
+# Reference Skills
 
-## Sub-Skills
+Offline-first lookup procedures used by the translation agents for word-sense disambiguation, synonym expansion, approved terminology and style decisions. All lookups are performed by the host coding agent reading bundled local resources; no API, token or metered network service is used or required.
 
-| Skill | Resource | Role | Access |
-|-------|----------|------|--------|
-| `en_lexicon` | Open English Wordnet 2025 | Synonyms, hypernyms, glosses, WSD | Local, offline |
-| `en_ar_bilingual` | Wiktionary EN + AR dumps | EN-AR headword pairs | Local dump |
-| `synonym_expansion` | Roget's Thesaurus 1911 | Concept-based synonym expansion | Local parse |
-| `style_reference` | UNESCO/AUSIT/Mozilla Arabic guides | Style rules, transliteration | Ingested knowledge base |
-| `datamuse_synonyms` | Datamuse API | Lightweight synonyms | Network, free |
+## Triggers
 
-## Tools
+- An agent needs a definition, synonym, EN↔AR headword pair or usage note.
+- A term must be checked against the approved term base before being rendered.
+- A style or transliteration question arises (see `docs/style-guide.md`).
 
-| Tool | Description |
-|------|-------------|
-| `lookup_definition` | Look up word definitions (Merriam-Webster, WordNet) |
-| `lookup_synonyms` | Look up synonyms (WordNet, Datamuse, Roget's) |
-| `lookup_en_ar` | Look up EN-AR translations (Wiktionary) |
-| `lookup_style_guide` | Look up style guide rules |
-| `query_glossary` | Query term base for approved translations |
+## Reference procedures (prompt procedures)
 
-## Usage
+| Procedure | Local resource | Role |
+|-----------|----------------|------|
+| `en_lexicon` | WordNet-style lexical notes in `research/dictionaries_references.md` | Synonyms, hypernyms, glosses, word-sense disambiguation |
+| `en_ar_bilingual` | `data/glossary.tbx` + `research/dictionaries_references.md` | EN↔AR headword pairs and approved renderings |
+| `synonym_expansion` | `research/dictionaries_references.md` | Concept-based synonym expansion for register choices |
+| `style_reference` | `docs/style-guide.md`, `research/papers_articles.md` | Arabic style, transliteration and formatting rules |
 
-```
-# Look up definition
-skills reference-skills lookup_definition --word "hello" --dictionary wordnet
+Named-entity detection is a reasoning step inside `agents/analysis_agent.md`; no separate entity tool exists. There is no network/metered dictionary service: offline resources are authoritative and the workflow stays air-gapped.
 
-# Look up synonyms
-skills reference-skills lookup_synonyms --word "translate" --source wordnet
+## Tools (prompt procedures)
 
-# Look up EN-AR translation
-skills reference-skills lookup_en_ar --term "computer" --direction en-ar
-
-# Query glossary
-skills reference-skills query_glossary --term "API" --domain technical
-```
+| Tool | What the host agent does |
+|------|--------------------------|
+| `lookup_definition` | Reads the local lexical notes to explain a headword and its senses. |
+| `lookup_synonyms` | Reads local synonym material to propose register-appropriate alternatives. |
+| `lookup_en_ar` | Looks up an EN↔AR pair in `data/glossary.tbx` and the bilingual notes. |
+| `lookup_style_guide` | Reads `docs/style-guide.md` for headings, quotes, RTL, diacritics and code rules. |
+| `query_glossary` | Returns the approved target term for a source term and domain from `data/glossary.tbx`. |
 
 ## Integration
 
-These skills are used by the translator-skill agents for:
-- Word sense disambiguation (Analysis Agent)
-- Synonym expansion (Translator Agent)
-- Style guide compliance (all agents)
-- Glossary lookup (all agents)
+These procedures are consulted by: Analysis (entity and difficult-term decisions), Translator (glossary injection), Post-editor (orthography and named entities), Reviewer and Judge (terminology adherence and MQM scoring), and Consistency (term tracking). The glossary is injected at **every** stage; an approved rendering is never replaced by a lookup synonym without an explicit flag.
 
-## Offline-First Policy
+## Offline-first policy
 
-Prefer offline/local resources (WordNet, Wiktionary dumps, Roget's, style guides) to avoid rate limits and work air-gapped. Use metered APIs (Merriam-Webster, Collins, Oxford) only when offline resources are insufficient, with caching and quota guards.
+Prefer the bundled local resources. If a term is genuinely absent, flag it with `confidence_flags` in `agents/translator_agent.md` for human review rather than contacting an external service. No API key or provider account exists in this pack.

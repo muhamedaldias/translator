@@ -1,0 +1,42 @@
+{
+  "name": "translator",
+  "version": "1.0.0",
+  "description": "Portable, key-free English↔Arabic translation skill pack: a seven-stage, MQM-gated workflow executed by the host coding agent with no API key or network dependency.",
+  "author": {
+    "name": "muhamedaldias"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/muhamedaldias/translator",
+  "keywords": [
+    "translation",
+    "arabic",
+    "english",
+    "mqm",
+    "key-free",
+    "offline"
+  ],
+  "commands": [
+    {
+      "name": "translate",
+      "description": "Translate EN↔AR text or a file via the seven-stage key-free workflow.",
+      "file": "commands/translate.md"
+    }
+  ],
+  "skills": [
+    "skills/translator-skill/SKILL.md",
+    "skills/reference-skills/SKILL.md"
+  ],
+  "agents": [
+    "agents/analysis_agent.md",
+    "agents/translator_agent.md",
+    "agents/posteditor_agent.md",
+    "agents/reviewer_agent.md",
+    "agents/editor_agent.md",
+    "agents/judge_agent.md",
+    "agents/consistency_agent.md"
+  ],
+  "docs": [
+    "docs/style-guide.md",
+    "docs/translation-brief-template.md"
+  ]
+}

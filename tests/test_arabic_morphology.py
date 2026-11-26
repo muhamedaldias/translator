@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""
-Unit tests for Arabic morphology module.
-"""
+"""Unit tests for Arabic morphology module (deterministic, offline)."""
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.arabic import ArabicProcessor, normalize_arabic, remove_arabic_diacritics, is_arabic_text
+from src.arabic import (
+    ArabicProcessor,
+    normalize_arabic,
+    remove_arabic_diacritics,
+    is_arabic_text,
+)
 
 
 class TestArabicProcessor:
@@ -18,71 +21,74 @@ class TestArabicProcessor:
         self.proc = ArabicProcessor()
 
     def test_is_arabic(self):
-        """Test Arabic text detection."""
         assert self.proc.is_arabic("مرحبا") is True
         assert self.proc.is_arabic("Hello") is False
         assert self.proc.is_arabic("Hello مرحبا") is True
 
     def test_normalize_orthography(self):
-        """Test Arabic orthography normalization."""
-        # Alef variants should normalize to plain alef
         text = "أ Machado إ input"
         result = self.proc.normalize_orthography(text)
         assert "أ" not in result
         assert "إ" not in result
 
     def test_remove_diacritics(self):
-        """Test diacritics removal."""
-        text = "مُسْلِمٌ"  # with diacritics
-        result = self.proc.remove_diacritics(text)
-        assert result == "مسلم"
+        assert self.proc.remove_diacritics("مُسْلِمٌ") == "مسلم"
 
     def test_diacritics_policy_remove(self):
-        """Test diacritics policy: remove."""
         self.proc.diacritics_policy = "remove"
-        text = "مُسْلِمٌ"
-        result = self.proc.apply_diacritics_policy(text)
-        assert result == "مسلم"
+        assert self.proc.apply_diacritics_policy("مُسْلِمٌ") == "مسلم"
 
     def test_diacritics_policy_retain(self):
-        """Test diacritics policy: retain."""
         self.proc.diacritics_policy = "retain"
-        text = "مُسْلِمٌ"
-        result = self.proc.apply_diacritics_policy(text)
-        assert result == text
+        assert self.proc.apply_diacritics_policy("مُسْلِمٌ") == "مُسْلِمٌ"
 
     def test_plural_form(self):
-        """Test Arabic plural form categories."""
-        assert self.proc.get_plural_form(0) == "zero"
-        assert self.proc.get_plural_form(1) == "one"
-        assert self.proc.get_plural_form(2) == "two"
-        assert self.proc.get_plural_form(5) == "few"
-        assert self.proc.get_plural_form(50) == "many"
-        assert self.proc.get_plural_form(100) == "other"
+        assert [self.proc.get_plural_form(n) for n in (0, 1, 2, 5, 50, 100)] == [
+            "zero", "one", "two", "few", "many", "other"
+        ]
 
     def test_detect_register_msa(self):
-        """Test MSA detection."""
-        text = "في هذا اليوم، يمكن القول إن"
-        result = self.proc.detect_register(text)
-        assert result in ("MSA", "dialect")
+        assert self.proc.detect_register("في هذا اليوم، يمكن القول إن") == "MSA"
+
+    def test_detect_register_dialect(self):
+        assert self.proc.detect_register("شو أخبارك؟ كيفك؟") == "dialect"
 
     def test_rtl_markers(self):
-        """Test RTL marker addition/removal."""
-        text = "مرحبا بالعالم"
-        marked = self.proc.add_rtl_markers(text)
-        assert "\u202B" in marked
-        assert "\u202C" in marked
-
-        unmarked = self.proc.remove_rtl_markers(marked)
-        assert "\u202B" not in unmarked
-        assert "\u202C" not in unmarked
+        marked = self.proc.add_rtl_markers("مرحبا بالعالم")
+        assert "\u202B" in marked and "\u202C" in marked
+        assert self.proc.remove_rtl_markers(marked) == "مرحبا بالعالم"
 
     def test_convenience_functions(self):
-        """Test module-level convenience functions."""
         assert is_arabic_text("مرحبا") is True
         assert is_arabic_text("Hello") is False
         assert remove_arabic_diacritics("مُسْلِمٌ") == "مسلم"
         assert "أ" not in normalize_arabic("أهلاً")
+
+    # --- Review Focus: protected spans ---------------------------------
+    def test_extract_protected_spans_verbatim(self):
+        text = 'See {{api_key}} and `code <x>` then <tag attr="v"> and {"id": 7}.'
+        spans = self.proc.extract_protected_spans(text)
+        assert spans == [
+            "{{api_key}}",
+            "`code <x>`",
+            '<tag attr="v">',
+            '{"id": 7}',
+        ]
+
+    def test_extract_protected_spans_empty_text(self):
+        assert self.proc.extract_protected_spans("   ") == []
+        assert self.proc.extract_protected_spans("") == []
+
+    def test_protect_code_blocks_uses_same_spans(self):
+        text = 'A {{token}} B `fn()` C <b> D {"id": 7}'
+        protected, blocks = self.proc.protect_code_blocks(text)
+        assert blocks == self.proc.extract_protected_spans(text)
+        assert self.proc.restore_code_blocks(protected, blocks) == text
+
+    def test_has_diacritics(self):
+        assert self.proc.has_diacritics("مُسْلِمٌ") is True
+        assert self.proc.has_diacritics("مسلم") is False
+        assert self.proc.has_diacritics("hello") is False
 
 
 if __name__ == "__main__":
