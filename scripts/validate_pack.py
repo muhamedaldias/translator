@@ -21,8 +21,8 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
 
 try:
     import yaml  # type: ignore
@@ -95,10 +95,10 @@ def _rel(root: Path, path: Path) -> str:
         return str(path)
 
 
-def _walk_text_files(root: Path, skip_dirs: Sequence[str] = ()) -> List[Path]:
+def _walk_text_files(root: Path, skip_dirs: Sequence[str] = ()) -> list[Path]:
     """All readable text files below root, excluding heavyweight tool dirs."""
     excluded = set(SKIP_DIRS) | set(skip_dirs)
-    found: List[Path] = []
+    found: list[Path] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
@@ -114,19 +114,18 @@ def _walk_text_files(root: Path, skip_dirs: Sequence[str] = ()) -> List[Path]:
     return found
 
 
-def _tracked_text_files(root: Path) -> List[Path]:
+def _tracked_text_files(root: Path) -> list[Path]:
     """Git-tracked text files, with a filesystem walk outside a git checkout."""
     git_dir = root / ".git"
     if git_dir.exists():
         try:
             proc = subprocess.run(
                 ["git", "-C", str(root), "ls-files", "-z"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 check=True,
                 timeout=30,
             )
-            files: List[Path] = []
+            files: list[Path] = []
             for raw in proc.stdout.split(b"\0"):
                 if not raw:
                     continue
@@ -144,7 +143,7 @@ def _tracked_text_files(root: Path) -> List[Path]:
     return _walk_text_files(root)
 
 
-def _frontmatter(path: Path) -> Tuple[Optional[dict], Optional[str]]:
+def _frontmatter(path: Path) -> tuple[dict | None, str | None]:
     """Parse YAML frontmatter, returning (data, error)."""
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
@@ -168,17 +167,15 @@ def _frontmatter(path: Path) -> Tuple[Optional[dict], Optional[str]]:
     return data, None
 
 
-def _api_key_violations(paths: Sequence[Path], root: Path) -> List[str]:
-    violations: List[str] = []
+def _api_key_violations(paths: Sequence[Path], root: Path) -> list[str]:
+    violations: list[str] = []
     for path in dict.fromkeys(paths):
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
         ):
             if NEGATION_RE.search(line):
                 continue  # "no API key is required" is the desired message
-            if ASSIGNMENT_RE.search(line) or (
-                API_KEY_RE.search(line) and SET_VERB_RE.search(line)
-            ):
+            if ASSIGNMENT_RE.search(line) or (API_KEY_RE.search(line) and SET_VERB_RE.search(line)):
                 violations.append(
                     f"api-key instruction: {_rel(root, path)}:{lineno} "
                     "instructs setting an API key"
@@ -186,10 +183,10 @@ def _api_key_violations(paths: Sequence[Path], root: Path) -> List[str]:
     return violations
 
 
-def validate_pack(root: Path) -> List[str]:
+def validate_pack(root: Path) -> list[str]:
     """Return a list of human-readable violations; empty means valid."""
     root = Path(root).resolve()
-    violations: List[str] = []
+    violations: list[str] = []
 
     # 1. Loadable frontmatter on every skill and agent definition.
     skills = sorted(root.glob("skills/**/SKILL.md"))
@@ -206,9 +203,7 @@ def validate_pack(root: Path) -> List[str]:
         for field in ("name", "description"):
             value = data.get(field)
             if not isinstance(value, str) or not value.strip():
-                violations.append(
-                    f"frontmatter: {_rel(root, path)}: missing or empty '{field}'"
-                )
+                violations.append(f"frontmatter: {_rel(root, path)}: missing or empty '{field}'")
 
     # 2. Claude Code plugin manifest parses.
     plugin = root / ".claude-plugin" / "plugin.json"
@@ -233,9 +228,7 @@ def validate_pack(root: Path) -> List[str]:
             path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
         ):
             if STALE_PATH in line:
-                violations.append(
-                    f"stale path: {_rel(root, path)}:{lineno} contains {STALE_PATH}"
-                )
+                violations.append(f"stale path: {_rel(root, path)}:{lineno} contains {STALE_PATH}")
 
     # 4. No API-key setup instructions in skills, agents or READMEs.
     api_key_paths = list(skills) + list(agents)
@@ -257,7 +250,7 @@ def validate_pack(root: Path) -> List[str]:
     return violations
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate the portable translation skill pack")
     parser.add_argument(
         "--root",

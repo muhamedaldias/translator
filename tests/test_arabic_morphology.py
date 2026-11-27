@@ -8,9 +8,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.arabic import (
     ArabicProcessor,
+    is_arabic_text,
     normalize_arabic,
     remove_arabic_diacritics,
-    is_arabic_text,
 )
 
 
@@ -44,7 +44,12 @@ class TestArabicProcessor:
 
     def test_plural_form(self):
         assert [self.proc.get_plural_form(n) for n in (0, 1, 2, 5, 50, 100)] == [
-            "zero", "one", "two", "few", "many", "other"
+            "zero",
+            "one",
+            "two",
+            "few",
+            "many",
+            "other",
         ]
 
     def test_detect_register_msa(self):
@@ -55,7 +60,7 @@ class TestArabicProcessor:
 
     def test_rtl_markers(self):
         marked = self.proc.add_rtl_markers("مرحبا بالعالم")
-        assert "\u202B" in marked and "\u202C" in marked
+        assert "\u202b" in marked and "\u202c" in marked
         assert self.proc.remove_rtl_markers(marked) == "مرحبا بالعالم"
 
     def test_convenience_functions(self):
@@ -93,4 +98,5 @@ class TestArabicProcessor:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

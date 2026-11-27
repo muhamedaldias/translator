@@ -17,8 +17,13 @@ import json
 import os
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+
+try:
+    from defusedxml.ElementTree import parse as _safe_xml_parse
+except ImportError:  # pragma: no cover - optional hardening dependency
+    _safe_xml_parse = ET.parse
 
 XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
 
@@ -37,12 +42,12 @@ def _language(element: ET.Element) -> str:
 class Glossary:
     """Term base for consistent translation terminology."""
 
-    def __init__(self, path: Optional[str] = None) -> None:
+    def __init__(self, path: str | None = None) -> None:
         self.path = path
-        self.terms: List[Dict[str, str]] = []
-        self.terms_by_source: Dict[str, Dict[str, str]] = {}
-        self.terms_by_target: Dict[str, Dict[str, str]] = {}
-        self.terms_by_source_all: Dict[str, List[Dict[str, str]]] = {}
+        self.terms: list[dict[str, str]] = []
+        self.terms_by_source: dict[str, dict[str, str]] = {}
+        self.terms_by_target: dict[str, dict[str, str]] = {}
+        self.terms_by_source_all: dict[str, list[dict[str, str]]] = {}
 
         if path and os.path.exists(path):
             self.load(path)
@@ -69,14 +74,16 @@ class Glossary:
 
     def _load_tbx(self, path: str) -> None:
         """Load TBX entries with or without XML namespaces."""
-        tree = ET.parse(path)
+        tree = _safe_xml_parse(path)
         root = tree.getroot()
+        if root is None:  # defensive: malformed/empty document
+            raise ValueError(f"empty TBX document: {path}")
 
         for term_entry in root.iter():
             if _local_name(term_entry.tag) != "termEntry":
                 continue
 
-            languages: Dict[str, List[str]] = {}
+            languages: dict[str, list[str]] = {}
             for lang_section in term_entry:
                 if _local_name(lang_section.tag) not in ("langSec", "langSet"):
                     continue
@@ -98,14 +105,14 @@ class Glossary:
             targets = languages.get("ar") or languages.get("target") or []
             for source in sources:
                 for target in targets:
-                    pair: Dict[str, str] = {"en": source, "ar": target}
+                    pair: dict[str, str] = {"en": source, "ar": target}
                     if domain:
                         pair["domain"] = domain
                     self.terms.append(pair)
 
     def _load_utx(self, path: str) -> None:
         """Load UTX (AAMT tab-delimited) file."""
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
@@ -116,7 +123,7 @@ class Glossary:
 
     def _load_json(self, path: str) -> None:
         """Load glossary from JSON file."""
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         if isinstance(data, list):
@@ -146,21 +153,17 @@ class Glossary:
     # Query
     # ------------------------------------------------------------------
     @staticmethod
-    def _targets(term: Dict[str, str]) -> List[str]:
-        return [
-            value
-            for key in ("ar", "target", "arabic")
-            if (value := term.get(key, ""))
-        ]
+    def _targets(term: dict[str, str]) -> list[str]:
+        return [value for key in ("ar", "target", "arabic") if (value := term.get(key, ""))]
 
-    def get(self, source_term: str, target_lang: str = "ar") -> Optional[str]:
+    def get(self, source_term: str, target_lang: str = "ar") -> str | None:
         """Get one translation for a source term."""
         term = self.terms_by_source.get(source_term.lower())
         if term:
             return term.get(target_lang) or self._targets(term)[0] if self._targets(term) else None
         return None
 
-    def get_reverse(self, target_term: str, source_lang: str = "en") -> Optional[str]:
+    def get_reverse(self, target_term: str, source_lang: str = "en") -> str | None:
         """Get source term for a target translation."""
         term = self.terms_by_target.get(target_term.lower())
         if term:
@@ -170,14 +173,14 @@ class Glossary:
     def get_relevant_terms(
         self,
         text: str,
-        domain: Optional[str] = None,
-    ) -> List[Dict[str, str]]:
+        domain: str | None = None,
+    ) -> list[dict[str, str]]:
         """Return glossary terms whose source occurs in ``text``.
 
         Matches are case-insensitive and de-duplicated by source/target pair,
         so adding two synonyms does not inflate downstream term checks.
         """
-        relevant: List[Dict[str, str]] = []
+        relevant: list[dict[str, str]] = []
         lowered = (text or "").lower()
         seen: set[tuple[str, str]] = set()
 
@@ -186,9 +189,7 @@ class Glossary:
             if not source:
                 continue
             # Whole-term matching: "API" must not match inside "api_key".
-            if not re.search(
-                r"(?<!\w)" + re.escape(source.lower()) + r"(?!\w)", lowered
-            ):
+            if not re.search(r"(?<!\w)" + re.escape(source.lower()) + r"(?!\w)", lowered):
                 continue
             # Domain is descriptive metadata, never a reason to drop an
             # approved term: mixed literary/technical documents must keep
@@ -207,7 +208,7 @@ class Glossary:
     def check_adherence(
         self,
         translation: str,
-        terms: Optional[Iterable[Dict[str, str]]] = None,
+        terms: Iterable[dict[str, str]] | None = None,
     ) -> float:
         """Percentage of required source terms rendered with an approved target.
 
@@ -219,7 +220,7 @@ class Glossary:
         if not checked:
             return 100.0
 
-        required: Dict[str, List[str]] = {}
+        required: dict[str, list[str]] = {}
         for term in checked:
             source = term.get("en", term.get("source", ""))
             targets = self._targets(term)
@@ -230,27 +231,28 @@ class Glossary:
             return 100.0
 
         found = sum(
-            1 for targets in required.values()
-            if any(target in translation for target in targets)
+            1 for targets in required.values() if any(target in translation for target in targets)
         )
         return (found / len(required)) * 100
 
     # ------------------------------------------------------------------
     # Add / Update
     # ------------------------------------------------------------------
-    def add_term(self, source: str, target: str, domain: Optional[str] = None) -> None:
+    def add_term(self, source: str, target: str, domain: str | None = None) -> None:
         """Add a new term to the glossary."""
-        term: Dict[str, str] = {"en": source, "ar": target}
+        term: dict[str, str] = {"en": source, "ar": target}
         if domain:
             term["domain"] = domain
 
         self.terms.append(term)
         self._build_indexes()
 
-    def save(self, path: Optional[str] = None) -> None:
+    def save(self, path: str | None = None) -> None:
         """Save glossary to JSON file."""
-        save_path = path or self.path or str(
-            Path(__file__).resolve().parent.parent / "data" / "glossary.json"
+        save_path = (
+            path
+            or self.path
+            or str(Path(__file__).resolve().parent.parent / "data" / "glossary.json")
         )
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(self.terms, f, ensure_ascii=False, indent=2)

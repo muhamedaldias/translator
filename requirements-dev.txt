@@ -1,0 +1,7 @@
+# Development-only tooling for CI. No provider keys, no model downloads.
+pytest-cov>=5.0
+ruff>=0.6
+black>=24.0
+bandit>=1.7
+mypy>=1.10
+types-PyYAML>=6.0

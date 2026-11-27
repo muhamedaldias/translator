@@ -23,7 +23,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import requests  # type: ignore
@@ -34,13 +34,14 @@ except Exception:  # pragma: no cover
 @dataclass
 class DictionaryEntry:
     """Standardized dictionary entry."""
+
     word: str
-    pos: Optional[str] = None  # part of speech
-    definition: Optional[str] = None
-    synonyms: List[str] = field(default_factory=list)
-    antonyms: List[str] = field(default_factory=list)
-    translations: Dict[str, List[str]] = field(default_factory=dict)  # lang -> [translations]
-    examples: List[str] = field(default_factory=list)
+    pos: str | None = None  # part of speech
+    definition: str | None = None
+    synonyms: list[str] = field(default_factory=list)
+    antonyms: list[str] = field(default_factory=list)
+    translations: dict[str, list[str]] = field(default_factory=dict)  # lang -> [translations]
+    examples: list[str] = field(default_factory=list)
     source: str = ""  # wordnet, wiktionary, merriam_webster, etc.
 
 
@@ -49,17 +50,23 @@ class DictionaryManager:
 
     def __init__(
         self,
-        data_dir: Optional[str] = None,
-        cache_dir: Optional[str] = None,
-        merriam_webster_key: Optional[str] = None,
-        collins_key: Optional[str] = None,
-        oxford_app_id: Optional[str] = None,
-        oxford_app_key: Optional[str] = None,
+        data_dir: str | None = None,
+        cache_dir: str | None = None,
+        merriam_webster_key: str | None = None,
+        collins_key: str | None = None,
+        oxford_app_id: str | None = None,
+        oxford_app_key: str | None = None,
     ) -> None:
-        self.data_dir = Path(data_dir) if data_dir else Path(
-            __file__).resolve().parent.parent / "data" / "dictionaries"
-        self.cache_dir = Path(cache_dir) if cache_dir else Path(
-            __file__).resolve().parent.parent / "data" / "cache"
+        self.data_dir = (
+            Path(data_dir)
+            if data_dir
+            else Path(__file__).resolve().parent.parent / "data" / "dictionaries"
+        )
+        self.cache_dir = (
+            Path(cache_dir)
+            if cache_dir
+            else Path(__file__).resolve().parent.parent / "data" / "cache"
+        )
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,13 +77,13 @@ class DictionaryManager:
         self.oxford_app_key = oxford_app_key or os.getenv("OXFORD_APP_KEY")
 
         # Cache (in-memory + SQLite)
-        self._memory_cache: Dict[str, Any] = {}
+        self._memory_cache: dict[str, Any] = {}
         self._init_sqlite_cache()
 
         # Loaded resources
-        self.wordnet: Optional[Any] = None
-        self._wiktionary_en_ar_data: Dict[str, List[str]] = {}
-        self._roget_synonyms_data: Dict[str, List[str]] = {}
+        self.wordnet: Any | None = None
+        self._wiktionary_en_ar_data: dict[str, list[str]] = {}
+        self._roget_synonyms_data: dict[str, list[str]] = {}
 
         self._load_resources()
 
@@ -87,25 +94,21 @@ class DictionaryManager:
         """Initialize SQLite cache for API responses."""
         self._db_path = self.cache_dir / "dictionary_cache.db"
         self._conn = sqlite3.connect(str(self._db_path))
-        self._conn.execute(
-            """
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS cache (
                 key TEXT PRIMARY KEY,
                 value TEXT,
                 expiry REAL
             )
-            """
-        )
+            """)
         self._conn.commit()
 
-    def _cache_get(self, key: str) -> Optional[Any]:
+    def _cache_get(self, key: str) -> Any | None:
         """Get value from cache."""
         if key in self._memory_cache:
             return self._memory_cache[key]
 
-        row = self._conn.execute(
-            "SELECT value, expiry FROM cache WHERE key = ?", (key,)
-        ).fetchone()
+        row = self._conn.execute("SELECT value, expiry FROM cache WHERE key = ?", (key,)).fetchone()
 
         if row and row[1] > time.time():
             self._memory_cache[key] = json.loads(row[0])
@@ -146,7 +149,7 @@ class DictionaryManager:
 
         for path in candidates:
             if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     self.wordnet = json.load(f)
                 return
 
@@ -168,7 +171,7 @@ class DictionaryManager:
 
         for path in candidates:
             if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     self._wiktionary_en_ar_data = json.load(f)
                 return
 
@@ -182,21 +185,21 @@ class DictionaryManager:
 
         for path in candidates:
             if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     self._roget_synonyms_data = json.load(f)
                 return
 
     # ------------------------------------------------------------------
     # WordNet operations
     # ------------------------------------------------------------------
-    def wordnet_synonyms(self, word: str, pos: Optional[str] = None) -> List[str]:
+    def wordnet_synonyms(self, word: str, pos: str | None = None) -> list[str]:
         """Get synonyms from WordNet."""
         cache_key = f"wn:syn:{word}:{pos or 'any'}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        synonyms: List[str] = []
+        synonyms: list[str] = []
 
         # NLTK WordNet
         # LazyCorpusLoader raises LookupError on attribute access when the
@@ -230,14 +233,14 @@ class DictionaryManager:
         self._cache_set(cache_key, synonyms)
         return synonyms
 
-    def wordnet_definition(self, word: str, pos: Optional[str] = None) -> Optional[str]:
+    def wordnet_definition(self, word: str, pos: str | None = None) -> str | None:
         """Get definition from WordNet."""
         cache_key = f"wn:def:{word}:{pos or 'any'}"
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        definition: Optional[str] = None
+        definition: str | None = None
 
         # LazyCorpusLoader raises LookupError on attribute access when the
         # optional corpus is absent; degrade gracefully instead of crashing.
@@ -268,7 +271,7 @@ class DictionaryManager:
     # ------------------------------------------------------------------
     # Wiktionary EN-AR
     # ------------------------------------------------------------------
-    def wiktionary_en_ar(self, word: str) -> List[str]:
+    def wiktionary_en_ar(self, word: str) -> list[str]:
         """Get EN-AR translations from Wiktionary.
 
         The backing map is ``_wiktionary_en_ar_data`` so this method name is
@@ -284,7 +287,7 @@ class DictionaryManager:
         self._cache_set(cache_key, translations)
         return translations
 
-    def wiktionary_ar_en(self, word: str) -> List[str]:
+    def wiktionary_ar_en(self, word: str) -> list[str]:
         """Get AR-EN translations from Wiktionary."""
         cache_key = f"wk:ar-en:{word.lower()}"
         cached = self._cache_get(cache_key)
@@ -292,7 +295,7 @@ class DictionaryManager:
             return cached
 
         # Reverse lookup
-        translations: List[str] = []
+        translations: list[str] = []
         for en_word, ar_translations in self._wiktionary_en_ar_data.items():
             if word.lower() in [t.lower() for t in ar_translations]:
                 translations.append(en_word)
@@ -303,7 +306,7 @@ class DictionaryManager:
     # ------------------------------------------------------------------
     # Roget's Thesaurus
     # ------------------------------------------------------------------
-    def roget_synonyms(self, word: str) -> List[str]:
+    def roget_synonyms(self, word: str) -> list[str]:
         """Get concept-based synonyms from Roget's Thesaurus.
 
         Backing map: ``_roget_synonyms_data`` (no method/attribute collision).
@@ -321,7 +324,7 @@ class DictionaryManager:
     # ------------------------------------------------------------------
     # Datamuse API
     # ------------------------------------------------------------------
-    def datamuse_synonyms(self, word: str) -> List[str]:
+    def datamuse_synonyms(self, word: str) -> list[str]:
         """Get synonyms from Datamuse API (free, no key)."""
         if requests is None:
             return []
@@ -331,12 +334,13 @@ class DictionaryManager:
         if cached is not None:
             return cached
 
-        synonyms: List[str] = []
+        synonyms: list[str] = []
 
         try:
+            params: dict[str, str | int] = {"rel_syn": word, "max": 10}
             resp = requests.get(
                 "https://api.datamuse.com/words",
-                params={"rel_syn": word, "max": 10},
+                params=params,
                 timeout=10,
             )
             if resp.status_code == 200:
@@ -351,7 +355,7 @@ class DictionaryManager:
     # ------------------------------------------------------------------
     # Merriam-Webster API (Phase 2, metered)
     # ------------------------------------------------------------------
-    def merriam_webster_definition(self, word: str) -> Optional[DictionaryEntry]:
+    def merriam_webster_definition(self, word: str) -> DictionaryEntry | None:
         """Get definition from Merriam-Webster Collegiate API."""
         if not self.merriam_webster_key or requests is None:
             return None
@@ -361,7 +365,7 @@ class DictionaryManager:
         if cached is not None:
             return DictionaryEntry(**cached)
 
-        entry: Optional[DictionaryEntry] = None
+        entry: DictionaryEntry | None = None
 
         try:
             resp = requests.get(
@@ -377,9 +381,7 @@ class DictionaryManager:
                         word=word,
                         pos=item.get("fl"),
                         definition=(
-                            item.get("shortdef", [""])[0]
-                            if item.get("shortdef")
-                            else None
+                            item.get("shortdef", [""])[0] if item.get("shortdef") else None
                         ),
                         source="merriam_webster",
                     )
@@ -398,7 +400,7 @@ class DictionaryManager:
         self,
         word: str,
         dictionary: str = "wordnet",
-    ) -> Optional[DictionaryEntry]:
+    ) -> DictionaryEntry | None:
         """Unified definition lookup across dictionaries."""
         if dictionary == "wordnet":
             defn = self.wordnet_definition(word)
@@ -417,7 +419,7 @@ class DictionaryManager:
         self,
         word: str,
         source: str = "wordnet",
-    ) -> List[str]:
+    ) -> list[str]:
         """Unified synonym lookup."""
         if source == "wordnet":
             return self.wordnet_synonyms(word)
@@ -437,7 +439,7 @@ class DictionaryManager:
         self,
         term: str,
         direction: str = "en-ar",
-    ) -> List[str]:
+    ) -> list[str]:
         """Unified EN-AR / AR-EN lookup."""
         if direction == "en-ar":
             return self.wiktionary_en_ar(term)
@@ -449,10 +451,10 @@ class DictionaryManager:
         self,
         text: str,
         max_terms: int = 10,
-    ) -> List[DictionaryEntry]:
+    ) -> list[DictionaryEntry]:
         """Extract difficult terms from text and look up their definitions."""
         words = re.findall(r"\b[A-Za-z]{4,}\b", text)
-        entries: List[DictionaryEntry] = []
+        entries: list[DictionaryEntry] = []
 
         for word in words[:max_terms]:
             entry = self.lookup_definition(word, dictionary="wordnet")

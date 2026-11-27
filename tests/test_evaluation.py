@@ -28,6 +28,7 @@ class TestTranslationEvaluator:
 
     def test_bleu_fallback_without_nltk_identical_is_100(self, monkeypatch):
         import src.evaluation as evaluation_module
+
         monkeypatch.setattr(evaluation_module, "nltk", None)
         ev = TranslationEvaluator()
         assert ev.smoothing is None
@@ -88,4 +89,5 @@ class TestTranslationEvaluator:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

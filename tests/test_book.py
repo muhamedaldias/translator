@@ -23,8 +23,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.book import REPO_ROOT, BookTranslator, _extract_placeholders
-from src.pipeline import JudgeResult
+from src.book import REPO_ROOT, BookTranslator, _extract_placeholders  # noqa: E402
+from src.pipeline import JudgeResult  # noqa: E402
 
 VENV_PY = sys.executable
 CLI = ROOT / "scripts" / "translate_book.py"
@@ -55,7 +55,7 @@ class StubPipeline:
     def validate(self, host_translation, brief):
         self.validate_calls.append((host_translation, brief))
         issues = []
-        for token in (brief.get("placeholder_map") or {}):
+        for token in brief.get("placeholder_map") or {}:
             if token not in (host_translation or ""):
                 issues.append(
                     {
@@ -159,7 +159,9 @@ def test_prepare_chapter_writes_brief_using_build_brief(project, tmp_path):
     assert brief_path.exists()
     record = json.loads(brief_path.read_text(encoding="utf-8"))
     brief = record["brief"]
-    assert set(["analysis", "glossary_terms", "placeholder_map", "agent_prompts", "style_profile"]).issubset(brief)
+    assert set(
+        ["analysis", "glossary_terms", "placeholder_map", "agent_prompts", "style_profile"]
+    ).issubset(brief)
     assert "{{name}}" in brief["placeholder_map"]
     assert len(stub.brief_calls) == 1
     assert stub.brief_calls[0][0] == "Hello {{name}} world."
@@ -251,9 +253,7 @@ def test_consistency_detects_changed_place(project):
 
 def test_consistency_detects_changed_glossary_rendering(project):
     tr = make_translator(project, StubPipeline())
-    tr.dynamic_glossary = [
-        {"source": "engine", "target": "محرك", "alternatives": ["موتور"]}
-    ]
+    tr.dynamic_glossary = [{"source": "engine", "target": "محرك", "alternatives": ["موتور"]}]
     result = tr.check_consistency(
         1,
         "استخدم المهندس محركا جديدا.",
@@ -301,14 +301,14 @@ def test_update_registries_truly_updates_including_dynamic_glossary(project):
     assert updates["terms_added"] == 1
     assert any(t["source"] == "engine" and t["target"] == "محرك" for t in tr.dynamic_glossary)
 
-    saved = json.loads(
-        (project / "data" / "dynamic_glossary.json").read_text(encoding="utf-8")
-    )
+    saved = json.loads((project / "data" / "dynamic_glossary.json").read_text(encoding="utf-8"))
     assert saved["terms"][0]["source"] == "engine"
 
     # dedupe on a second call
     updates2 = tr.update_registries_from_chapter(
-        2, "ترجمة", "Another sentence.",
+        2,
+        "ترجمة",
+        "Another sentence.",
         glossary_terms=[{"source": "engine", "target": "محرك"}],
     )
     assert updates2["terms_added"] == 0
@@ -394,7 +394,9 @@ def test_fallback_brief_and_validate_without_task_a(project, tmp_path):
     src.write_text("Keep {{token}} verbatim.", encoding="utf-8")
     info = tr.prepare_chapter(source_path=str(src), chapter_id="1")
     record = json.loads(Path(info["brief_path"]).read_text(encoding="utf-8"))
-    assert set(["analysis", "glossary_terms", "placeholder_map", "agent_prompts", "style_profile"]).issubset(record["brief"])
+    assert set(
+        ["analysis", "glossary_terms", "placeholder_map", "agent_prompts", "style_profile"]
+    ).issubset(record["brief"])
 
     ok = tr.assemble_chapter("1", "احفظ {{token}} حرفيا")
     assert ok["passed"] is True
@@ -426,7 +428,15 @@ def test_cli_list_formats_without_input():
 def test_cli_help_without_input():
     result = _run_cli("--help")
     assert result.returncode == 0, result.stderr
-    for flag in ("--prepare", "--assemble", "--list-formats", "--input", "--target", "--output", "--format"):
+    for flag in (
+        "--prepare",
+        "--assemble",
+        "--list-formats",
+        "--input",
+        "--target",
+        "--output",
+        "--format",
+    ):
         assert flag in result.stdout
 
 

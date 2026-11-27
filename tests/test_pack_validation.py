@@ -65,17 +65,13 @@ def test_empty_frontmatter_field_is_reported(pack: Path, field: str) -> None:
         "",
         "# Demo",
     ]
-    (pack / "agents" / "demo_agent.md").write_text(
-        "\n".join(lines) + "\n", encoding="utf-8"
-    )
+    (pack / "agents" / "demo_agent.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     violations = validate_pack(pack)
     assert any("frontmatter" in v and field in v for v in violations)
 
 
 def test_malformed_plugin_manifest_is_reported(pack: Path) -> None:
-    (pack / ".claude-plugin" / "plugin.json").write_text(
-        "{not valid json", encoding="utf-8"
-    )
+    (pack / ".claude-plugin" / "plugin.json").write_text("{not valid json", encoding="utf-8")
     violations = validate_pack(pack)
     assert any("plugin" in v and "does not parse" in v for v in violations)
 
@@ -94,9 +90,7 @@ def test_stale_path_in_tracked_text_file_is_reported(pack: Path) -> None:
 
 def test_stale_path_in_python_file_is_reported(pack: Path) -> None:
     (pack / "src").mkdir()
-    (pack / "src" / "book.py").write_text(
-        f'ROOT = "{STALE_PATH}"\n', encoding="utf-8"
-    )
+    (pack / "src" / "book.py").write_text(f'ROOT = "{STALE_PATH}"\n', encoding="utf-8")
     violations = validate_pack(pack)
     assert any("stale path" in v and "book.py" in v for v in violations)
 
@@ -146,9 +140,7 @@ def test_validator_prints_clear_violation_list_and_fails(
     assert "2. stale path:" in output
 
 
-def test_main_returns_zero_on_valid_pack(
-    pack: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_returns_zero_on_valid_pack(pack: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--root", str(pack)]) == 0
     assert "Pack validation PASSED" in capsys.readouterr().out
 

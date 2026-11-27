@@ -1,5 +1,8 @@
 # Portable Translation Skill Pack (EN ↔ Arabic)
 
+[![CI](https://github.com/muhamedaldias/translator/actions/workflows/ci.yml/badge.svg)](https://github.com/muhamedaldias/translator/actions/workflows/ci.yml)
+[![Release](https://github.com/muhamedaldias/translator/actions/workflows/release.yml/badge.svg)](https://github.com/muhamedaldias/translator/actions/workflows/release.yml)
+
 A professional, portable skill pack that adds a high-quality English ↔ Arabic translation workflow to any coding agent. The host agent's own model performs every translation stage; there is **no API key, no provider account and no network dependency** in the translation path.
 
 ## Why it is different
@@ -76,11 +79,36 @@ All paths are relative to the repository root.
 ## Develop and verify
 
 ```bash
-python -m pytest tests/ -v
+python -m pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest tests/ -q --cov=src --cov-report=term-missing --cov-fail-under=75
 python scripts/validate_pack.py
+ruff check src tests scripts
+black --check src tests scripts
+mypy -p src
+bandit -q -r src -ll
+bash scripts/install.sh --host generic --dest /tmp/pack-host --dry-run
 ```
 
-CI runs the test suite, pack validation and a key-free smoke test on every push and pull request. `main` is protected: changes require a pull request and passing status checks, force pushes and deletions are blocked, and there is no admin bypass. Direct pushes to `main` are not part of the workflow.
+### CI/CD gates
+
+Every push to `main` and every pull request runs four independent jobs:
+
+- **test** — pytest with a 75% coverage floor, pack validation and a key-free brief smoke test on Python 3.10, 3.11 and 3.12.
+- **quality** — Ruff lint, Black format check and Mypy type check.
+- **security** — Bandit scan at medium severity and above; no known medium/high findings are tolerated.
+- **install-smoke** — installs the pack into an isolated directory and runs the installed support layer, so prompts can never point at files that were not shipped.
+
+`main` is protected: changes require a pull request, all status checks must pass, force pushes and deletions are blocked, and there is no admin bypass. Direct pushes to `main` are not part of the workflow.
+
+### Continuous delivery
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which packages the portable core (skills, agents, docs, config, data, support layer, adapters) into `translator-skill-pack.zip`, uploads it as a build artifact and publishes a GitHub Release with generated notes. Example:
+
+```bash
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+Dependabot checks pip and GitHub Actions dependencies weekly.
 
 ## License
 

@@ -19,13 +19,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.book import BookTranslator
 from src.book_formats import list_supported_formats
-
 
 SOURCE_SUFFIXES = (".txt", ".md")
 
@@ -40,7 +38,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--format", default="txt", help="Book format: txt, md, epub, docx, pdf")
     parser.add_argument("--prepare", action="store_true", help="Build briefs for all chapters")
     parser.add_argument(
-        "--assemble", action="store_true",
+        "--assemble",
+        action="store_true",
         help="Validate host translations against briefs and write output",
     )
     parser.add_argument(
@@ -61,11 +60,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _collect_sources(input_path: Path) -> List[Path]:
+def _collect_sources(input_path: Path) -> list[Path]:
     if input_path.is_dir():
-        return sorted(
-            p for p in input_path.glob("*") if p.suffix.lower() in SOURCE_SUFFIXES
-        )
+        return sorted(p for p in input_path.glob("*") if p.suffix.lower() in SOURCE_SUFFIXES)
     if input_path.exists():
         return [input_path]
     return []
@@ -73,6 +70,7 @@ def _collect_sources(input_path: Path) -> List[Path]:
 
 def _slug(path: Path) -> str:
     import re
+
     match = re.search(r"(\d+)", path.stem)
     return f"{int(match.group(1)):03d}" if match else path.stem
 
@@ -85,7 +83,7 @@ def _run_prepare(translator: BookTranslator, args: argparse.Namespace, parser) -
         print(f"No source chapters found in: {args.input}")
         return 1
 
-    previous_context: Optional[str] = None
+    previous_context: str | None = None
     records = []
     for source in sources:
         chapter_id = _slug(source)
@@ -107,7 +105,7 @@ def _run_prepare(translator: BookTranslator, args: argparse.Namespace, parser) -
     return 0
 
 
-def _host_translation_inputs(args: argparse.Namespace, parser) -> List[tuple]:
+def _host_translation_inputs(args: argparse.Namespace, parser) -> list[tuple]:
     """Return a list of (chapter_id, translation_text) pairs."""
     if args.host_translation is not None:
         if not args.chapter:
@@ -124,7 +122,7 @@ def _host_translation_inputs(args: argparse.Namespace, parser) -> List[tuple]:
         if not files:
             print(f"No host translations found in: {args.translations}")
             return []
-        return [( _slug(p), p.read_text(encoding="utf-8")) for p in files]
+        return [(_slug(p), p.read_text(encoding="utf-8")) for p in files]
 
     if args.input and not Path(args.input).is_dir() and Path(args.input).exists():
         path = Path(args.input)
@@ -143,9 +141,7 @@ def _run_assemble(translator: BookTranslator, args: argparse.Namespace, parser) 
         return 1
 
     for chapter_id, translation in pairs:
-        result = translator.assemble_chapter(
-            chapter_id, translation, output_dir=args.output
-        )
+        result = translator.assemble_chapter(chapter_id, translation, output_dir=args.output)
         validation = result["validation"]
         status = "PASSED" if result["passed"] else "NEEDS REVIEW"
         issues = validation.get("issues", []) if isinstance(validation, dict) else []
@@ -187,7 +183,7 @@ def _run_legacy(translator: BookTranslator, args: argparse.Namespace, parser) ->
     return 0
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 

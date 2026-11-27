@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.dictionary import DictionaryManager, DictionaryEntry
+from src.dictionary import DictionaryEntry, DictionaryManager
 
 
 class TestDictionaryManager:
@@ -63,4 +63,5 @@ class TestDictionaryManager:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

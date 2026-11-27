@@ -8,7 +8,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.glossary import Glossary
 
-
 NAMESPACED_TBX = """<?xml version="1.0" encoding="UTF-8"?>
 <tbx xmlns="urn:iso:std:iso:30042:ed-2" version="2.0" lang="en">
   <termEntry id="1">
@@ -92,15 +91,21 @@ class TestGlossary:
     def test_mixed_domain_keeps_technical_terms(self, tmp_path):
         # A literary book that mentions a computer must still receive the
         # approved technology term; domain must never silently drop terms.
-        g = Glossary(_write(tmp_path, "g.tbx", (
-            '<?xml version="1.0"?><tbx version="2.0" lang="en">'
-            '<termEntry id="1">'
-            '<langSec lang="en"><term>computer</term>'
-            '<descrip type="subjectField">technology</descrip></langSec>'
-            '<langSec lang="ar"><term>حاسوب</term>'
-            '<descrip type="subjectField">technology</descrip></langSec>'
-            '</termEntry></tbx>'
-        )))
+        g = Glossary(
+            _write(
+                tmp_path,
+                "g.tbx",
+                (
+                    '<?xml version="1.0"?><tbx version="2.0" lang="en">'
+                    '<termEntry id="1">'
+                    '<langSec lang="en"><term>computer</term>'
+                    '<descrip type="subjectField">technology</descrip></langSec>'
+                    '<langSec lang="ar"><term>حاسوب</term>'
+                    '<descrip type="subjectField">technology</descrip></langSec>'
+                    "</termEntry></tbx>"
+                ),
+            )
+        )
         for domain in ("general", "literary", "technology"):
             terms = g.get_relevant_terms("The computer is ready", domain)
             assert len(terms) == 1, (domain, terms)
@@ -109,4 +114,5 @@ class TestGlossary:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

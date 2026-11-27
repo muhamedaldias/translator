@@ -64,9 +64,9 @@ def test_readme_has_no_api_key_setup() -> None:
     )
     for pattern in forbidden:
         assert not re.search(pattern, readme, re.IGNORECASE), pattern
-    assert re.search(r"no\s+api[\s_-]?key", readme, re.IGNORECASE), (
-        "README should state that no API key is required"
-    )
+    assert re.search(
+        r"no\s+api[\s_-]?key", readme, re.IGNORECASE
+    ), "README should state that no API key is required"
 
 
 def test_readme_documents_installer_and_seven_agents() -> None:

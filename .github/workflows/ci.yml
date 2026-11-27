@@ -1,12 +1,17 @@
 name: CI
 
-# Key-free, offline-by-design: no secrets, no model downloads, no provider APIs.
+# Professional gates, fully offline: no secrets, no provider keys, no model downloads.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -16,7 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -26,19 +30,80 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Run test suite
-        run: python -m pytest tests/ -v
+      - name: Run test suite with coverage gate
+        run: >-
+          python -m pytest tests/ -q
+          --cov=src --cov-report=term-missing --cov-fail-under=75
 
       - name: Validate portable skill pack
         run: python scripts/validate_pack.py
 
       - name: Key-free brief smoke test
         run: |
-          python src/pipeline.py --source "Hello world" --target ar --brief /tmp/brief.json
-          python -c "import json; d=json.load(open('/tmp/brief.json', encoding='utf-8')); assert len(d['agent_prompts']) == 7; assert d['analysis']"
+          python src/pipeline.py --source "Hello world {{term}}" --target ar --brief /tmp/brief.json
+          python -c "import json; d=json.load(open('/tmp/brief.json',encoding='utf-8')); assert len(d['agent_prompts'])==7; assert d['placeholder_map']; print('brief smoke OK')"
+
+  quality:
+    name: code quality (ruff, black, mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Ruff lint
+        run: ruff check src tests scripts
+      - name: Black format check
+        run: black --check src tests scripts
+      - name: Mypy type check
+        run: mypy -p src
+
+  security:
+    name: security scan (bandit, medium+)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Bandit static security scan
+        run: bandit -q -r src -ll
+
+  install-smoke:
+    name: installed-pack smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Install the pack into an isolated host directory
+        run: bash scripts/install.sh --host generic --dest /tmp/pack-host
+      - name: Verify installed files and run installed support layer
+        run: |
+          test -f /tmp/pack-host/.agents/skills/translator-skill/SKILL.md
+          test -f /tmp/pack-host/.agents/agents/judge_agent.md
+          test -f /tmp/pack-host/.agents/config/translator.yaml
+          test -f /tmp/pack-host/.agents/data/glossary.tbx
+          test -f /tmp/pack-host/.agents/src/glossary.py
+          test -f /tmp/pack-host/.agents/scripts/translate_book.py
+          cd /tmp/pack-host/.agents
+          PYTHONPATH=. python -c "from src.pipeline import TranslationPipeline; p=TranslationPipeline(); b=p.build_brief('The computer is ready. {{term}}'); assert len(b['glossary_terms'])>=1; assert len(b['agent_prompts'])==7; p.close(); print('installed pack OK')"
