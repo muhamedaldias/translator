@@ -100,6 +100,24 @@ Every push to `main` and every pull request runs four independent jobs:
 
 `main` is protected: changes require a pull request, all status checks must pass, force pushes and deletions are blocked, and there is no admin bypass. Direct pushes to `main` are not part of the workflow.
 
+### Lexicon expansion (opt-in)
+
+The shipped `data/glossary.tbx` is a small curated EN↔AR term base with provenance
+fields (`source`, `license`, `confidence`). To work with a much larger open lexicon
+without putting a multi-gigabyte dump into Git:
+
+```bash
+python scripts/fetch_lexicon.py --source wiktionary-ar --limit 1000
+python scripts/fetch_lexicon.py --source oewn --limit 5000
+```
+
+The downloader caches raw bytes under `data/cache/`, extracts compact provenance-tagged
+JSONL under `data/dictionaries/`, and both directories are gitignored. Open English
+WordNet is CC BY 4.0 and Wiktionary text is CC BY-SA 4.0 + GFDL; see `NOTICE`.
+Proprietary dictionaries are deliberately **not** redistributed. CI rejects tracked
+files over 1 MiB under `data/` or `skills/`, proprietary dictionary names inside `data/`,
+and a missing `NOTICE`.
+
 ### Continuous delivery
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which packages the portable core (skills, agents, docs, config, data, support layer, adapters) into `translator-skill-pack.zip`, uploads it as a build artifact and publishes a GitHub Release with generated notes. Example:

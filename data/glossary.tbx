@@ -11,11 +11,17 @@
       <term>computer</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>حاسوب</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -24,11 +30,17 @@
       <term>software</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>برمجيات</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -37,11 +49,17 @@
       <term>application</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>تطبيق</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -50,11 +68,17 @@
       <term>interface</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>واجهة</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -63,11 +87,17 @@
       <term>API</term>
       <termType>acronym</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>واجهة برمجة التطبيقات</term>
       <termType>acronym</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -76,11 +106,17 @@
       <term>database</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>قاعدة بيانات</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -89,11 +125,17 @@
       <term>server</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>خادم</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -102,11 +144,17 @@
       <term>client</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>عميل</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -115,11 +163,17 @@
       <term>function</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">programming</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>دالة</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">programming</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 
@@ -128,11 +182,17 @@
       <term>variable</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">programming</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
     <langSec lang="ar">
       <term>متغير</term>
       <termType>commonNoun</termType>
       <descrip type="subjectField">programming</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
     </langSec>
   </termEntry>
 

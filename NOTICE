@@ -1,0 +1,50 @@
+NOTICE
+======
+
+This repository ships only a small curated term base and opt-in, regenerable
+lexicon extracts. No proprietary dictionary data is redistributed.
+
+Open English WordNet
+--------------------
+Source: Open English WordNet 2025 (WN-LMF XML), https://en-word.net/downloads
+Project: https://github.com/globalwordnet/english-wordnet
+License: Creative Commons Attribution 4.0 International (CC BY 4.0),
+         https://creativecommons.org/licenses/by/4.0/
+Open English WordNet is derived from Princeton WordNet; attribution to the
+Global WordNet Association and the original Princeton WordNet authors is
+retained in the extracted records. OEWN is an English-only resource: it
+provides English terms and has no Arabic translations, so records extracted
+from it carry an empty "ar" field.
+
+Wiktionary
+----------
+Source: Arabic Wiktionary text, extracted by kaikki.org (wiktextract) and
+        distributed as JSONL at
+        https://kaikki.org/dictionary/Arabic/kaikki.org-dictionary-Arabic.jsonl
+License: dual-licensed under the Creative Commons Attribution-ShareAlike 4.0
+         International License (CC BY-SA 4.0),
+         https://creativecommons.org/licenses/by-sa/4.0/, and the GNU Free
+         Documentation License (GFDL), without invariant sections or cover
+         texts, https://www.gnu.org/licenses/fdl-1.3.html
+         See https://en.wiktionary.org/wiki/Wiktionary:Copyrights and
+         https://dumps.wikimedia.org/legal.html
+Derivative JSONL extracts must retain this attribution and remain under a
+compatible licence. The extraction is provided by kaikki.org
+(https://kaikki.org/), using the wiktextract tool
+(https://github.com/tatuylonen/wikitextprocessor).
+
+Data NOT redistributed
+----------------------
+Merriam-Webster, Oxford and Collins dictionary data is NOT redistributed by
+this repository. Those publishers' terms restrict bulk copying, downloading
+and redistribution; their APIs are not used by the downloader and no output
+derived from them is committed here. See:
+  https://www.merriam-webster.com/i/terms-of-use
+  https://languages.oup.com/legal-notice/
+  https://www.collinsdictionary.com/terms-and-conditions
+
+Raw downloads are cached outside Git under data/cache/; generated extracts
+live under data/dictionaries/ and can be regenerated with:
+  python scripts/fetch_lexicon.py --source oewn --limit 100
+  python scripts/fetch_lexicon.py --source wiktionary-ar --limit 100
+No API key is required.

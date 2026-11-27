@@ -9,7 +9,11 @@ Checks (all must hold for exit status 0):
     (assembled at runtime so this validator does not flag itself);
   * no SKILL.md, agent definition or README instructs the reader to set an
     API key (mentions that say no key is needed are fine);
-  * outputs/ is ignored by .gitignore.
+  * outputs/ is ignored by .gitignore;
+  * no tracked file under data/ or skills/ exceeds 1 MiB;
+  * no proprietary dictionary name (Merriam-Webster/Oxford/Collins) appears
+    in a file under data/;
+  * a root NOTICE exists and mentions CC BY 4.0 and CC BY-SA 4.0.
 
 Usage: python scripts/validate_pack.py [--root REPO_ROOT]
 """
@@ -86,6 +90,16 @@ ASSIGNMENT_RE = re.compile(
 )
 OUTPUTS_IGNORE_RE = re.compile(r"^outputs/?\s*(?:#.*)?$")
 
+# Data-source gates (lexicon expansion design, approved 2026-11-27).
+MAX_TRACKED_FILE_BYTES = 1024 * 1024  # 1 MiB - large lexicons belong outside Git
+PROPRIETARY_DICTIONARY_RE = re.compile(
+    r"\b(?:merriam[\s-]*webster|oxford|collins)\b",
+    re.IGNORECASE,
+)
+NOTICE_FILENAMES = ("NOTICE", "NOTICE.md", "NOTICE.txt", "NOTICE.rst")
+REQUIRED_LICENSE_MARKERS = ("CC BY 4.0", "CC BY-SA 4.0")
+DATA_SOURCE_DIRS = ("data", "skills")
+
 
 def _rel(root: Path, path: Path) -> str:
     """Return a stable, relative path for messages."""
@@ -141,6 +155,54 @@ def _tracked_text_files(root: Path) -> list[Path]:
         except (OSError, subprocess.SubprocessError):
             pass  # fall through to the untracked-tree fallback
     return _walk_text_files(root)
+
+
+def _candidate_files(root: Path) -> list[Path]:
+    """Files that would be committed: git-tracked in a checkout, else walked."""
+    git_dir = root / ".git"
+    candidates: list[Path] | None = None
+    if git_dir.exists():
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(root), "ls-files", "-z"],
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            candidates = [
+                root / raw.decode("utf-8", "replace") for raw in proc.stdout.split(b"\0") if raw
+            ]
+        except (OSError, subprocess.SubprocessError):
+            candidates = None
+    if candidates is None:
+        candidates = sorted(p for p in root.rglob("*") if p.is_file())
+    files: list[Path] = []
+    for path in candidates:
+        try:
+            parts = path.relative_to(root).parts
+        except ValueError:
+            continue
+        if any(part in SKIP_DIRS for part in parts):
+            continue
+        if path.is_file():
+            files.append(path)
+    return files
+
+
+def _is_text_file(path: Path) -> bool:
+    """True for a UTF-8 readable file with a non-binary suffix."""
+    if path.suffix.lower() in BINARY_SUFFIXES:
+        return False
+    try:
+        path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return False
+    return True
+
+
+def _under_data_source_dir(rel: str) -> bool:
+    """True when a root-relative POSIX path lives under data/ or skills/."""
+    return any(rel == d or rel.startswith(d + "/") for d in DATA_SOURCE_DIRS)
 
 
 def _frontmatter(path: Path) -> tuple[dict | None, str | None]:
@@ -246,6 +308,54 @@ def validate_pack(root: Path) -> list[str]:
         ]
         if not any(OUTPUTS_IGNORE_RE.match(line) for line in lines):
             violations.append("gitignore: outputs/ is not ignored by .gitignore")
+
+    # 6. Tracked data/skill files must stay under 1 MiB.
+    for path in _candidate_files(root):
+        rel = _rel(root, path)
+        if not _under_data_source_dir(rel):
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size > MAX_TRACKED_FILE_BYTES:
+            violations.append(
+                f"oversized file: {rel} is {size} bytes (> 1 MiB); "
+                "cache large lexicons outside Git"
+            )
+
+    # 7. No proprietary dictionary data under data/.
+    for path in _candidate_files(root):
+        rel = _rel(root, path)
+        if not rel.startswith("data/") or not _is_text_file(path):
+            continue
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
+            match = PROPRIETARY_DICTIONARY_RE.search(line)
+            if match:
+                violations.append(
+                    f"proprietary dictionary: {rel}:{lineno} mentions "
+                    f"'{match.group(0)}'; proprietary data may not be redistributed"
+                )
+
+    # 8. Root NOTICE must carry open-data attribution and license terms.
+    notice = next(
+        (root / name for name in NOTICE_FILENAMES if (root / name).is_file()),
+        None,
+    )
+    if notice is None:
+        violations.append(
+            "notice: missing root NOTICE (data-source attribution and licenses required)"
+        )
+    else:
+        lowered = notice.read_text(encoding="utf-8", errors="replace").lower()
+        missing = [m for m in REQUIRED_LICENSE_MARKERS if m.lower() not in lowered]
+        if missing:
+            violations.append(
+                f"notice: {_rel(root, notice)} is missing required license marker(s): "
+                + ", ".join(missing)
+            )
 
     return violations
 

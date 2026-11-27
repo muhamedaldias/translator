@@ -40,6 +40,11 @@ def pack(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (tmp_path / ".gitignore").write_text("outputs/\n__pycache__/\n", encoding="utf-8")
+    (tmp_path / "NOTICE").write_text(
+        "Data sources: Open English WordNet and Wiktionary Arabic.\n"
+        "Licenses: CC BY 4.0 and CC BY-SA 4.0.\n",
+        encoding="utf-8",
+    )
     return tmp_path
 
 
@@ -150,3 +155,47 @@ def test_validation_does_not_mutate_files(pack: Path) -> None:
     validate_pack(pack)
     after = {p.relative_to(pack): p.read_bytes() for p in pack.rglob("*") if p.is_file()}
     assert before == after
+
+
+# --- Data-source gates (lexicon expansion design, approved 2026-11-27) ---
+
+
+@pytest.mark.parametrize("relative_dir", ["data", "skills/demo"])
+def test_oversized_tracked_file_is_reported_and_exits_1(
+    pack: Path, capsys: pytest.CaptureFixture[str], relative_dir: str
+) -> None:
+    target_dir = pack / relative_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    big = target_dir / "huge.jsonl"
+    big.write_bytes(b"x" * (1024 * 1024 + 1))  # one byte over 1 MiB
+    violations = validate_pack(pack)
+    assert any("oversized" in v and "huge.jsonl" in v for v in violations)
+    assert main(["--root", str(pack)]) == 1
+    assert "oversized" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("dictionary_name", ["Merriam-Webster", "Oxford", "Collins"])
+def test_proprietary_dictionary_name_in_data_is_reported(pack: Path, dictionary_name: str) -> None:
+    data_dir = pack / "data"
+    data_dir.mkdir(exist_ok=True)
+    (data_dir / "glossary.tbx").write_text(
+        f"<note>Compiled from {dictionary_name} data</note>\n", encoding="utf-8"
+    )
+    violations = validate_pack(pack)
+    assert any("proprietary" in v and "glossary.tbx" in v for v in violations)
+
+
+def test_missing_root_notice_is_reported(pack: Path) -> None:
+    (pack / "NOTICE").unlink()
+    violations = validate_pack(pack)
+    assert any("notice" in v.lower() and "NOTICE" in v for v in violations)
+
+
+def test_notice_with_both_licenses_passes(pack: Path) -> None:
+    (pack / "NOTICE").write_text(
+        "Attribution: Open English WordNet (CC BY 4.0); " "Wiktionary Arabic (CC BY-SA 4.0).\n",
+        encoding="utf-8",
+    )
+    violations = validate_pack(pack)
+    assert not any("notice" in v.lower() for v in violations)
+    assert violations == []

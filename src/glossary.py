@@ -95,11 +95,18 @@ class Glossary:
                 ]
                 languages.setdefault(lang, []).extend(terms)
 
-            domain = ""
+            # Collect every <descrip type="..."> in the entry, including those
+            # nested inside either language section. ``subjectField`` keeps its
+            # historical ``domain`` alias; every other type is exposed under
+            # its own name (source, license, confidence, arbitrary notes...).
+            descrips: dict[str, str] = {}
             for el in term_entry.iter():
-                if _local_name(el.tag) == "descrip" and el.get("type") == "subjectField":
-                    domain = (el.text or "").strip()
-                    break
+                if _local_name(el.tag) == "descrip":
+                    dtype = el.get("type")
+                    if dtype:
+                        descrips[dtype] = (el.text or "").strip()
+
+            domain = descrips.get("subjectField", "")
 
             sources = languages.get("en") or languages.get("source") or []
             targets = languages.get("ar") or languages.get("target") or []
@@ -108,6 +115,9 @@ class Glossary:
                     pair: dict[str, str] = {"en": source, "ar": target}
                     if domain:
                         pair["domain"] = domain
+                    for key, value in descrips.items():
+                        if key != "subjectField" and value:
+                            pair[key] = value
                     self.terms.append(pair)
 
     def _load_utx(self, path: str) -> None:
