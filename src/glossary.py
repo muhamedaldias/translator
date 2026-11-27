@@ -183,11 +183,16 @@ class Glossary:
 
         for term in self.terms:
             source = term.get("en", term.get("source", ""))
-            if not source or source.lower() not in lowered:
+            if not source:
                 continue
-            term_domain = term.get("domain")
-            if domain and term_domain and term_domain.lower() != domain.lower():
+            # Whole-term matching: "API" must not match inside "api_key".
+            if not re.search(
+                r"(?<!\w)" + re.escape(source.lower()) + r"(?!\w)", lowered
+            ):
                 continue
+            # Domain is descriptive metadata, never a reason to drop an
+            # approved term: mixed literary/technical documents must keep
+            # every term that actually occurs in the source.
             key = (source, self._targets(term)[0] if self._targets(term) else "")
             if key in seen:
                 continue

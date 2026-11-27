@@ -89,6 +89,23 @@ class TestGlossary:
         else:
             raise AssertionError("expected ValueError for unsupported format")
 
+    def test_mixed_domain_keeps_technical_terms(self, tmp_path):
+        # A literary book that mentions a computer must still receive the
+        # approved technology term; domain must never silently drop terms.
+        g = Glossary(_write(tmp_path, "g.tbx", (
+            '<?xml version="1.0"?><tbx version="2.0" lang="en">'
+            '<termEntry id="1">'
+            '<langSec lang="en"><term>computer</term>'
+            '<descrip type="subjectField">technology</descrip></langSec>'
+            '<langSec lang="ar"><term>حاسوب</term>'
+            '<descrip type="subjectField">technology</descrip></langSec>'
+            '</termEntry></tbx>'
+        )))
+        for domain in ("general", "literary", "technology"):
+            terms = g.get_relevant_terms("The computer is ready", domain)
+            assert len(terms) == 1, (domain, terms)
+            assert terms[0]["ar"] == "حاسوب"
+
 
 if __name__ == "__main__":
     import pytest

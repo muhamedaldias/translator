@@ -176,9 +176,13 @@ for DATA_SRC in "$REPO_ROOT"/data/*.json "$REPO_ROOT"/data/*.tbx; do
   [ -f "$DATA_SRC" ] || continue
   install_file "$DATA_SRC" "$TARGET/data/$(basename "$DATA_SRC")"
 done
-install_file "$REPO_ROOT/src/pipeline.py" "$TARGET/src/pipeline.py"
+for SRC_PY in "$REPO_ROOT"/src/*.py; do
+  [ -f "$SRC_PY" ] || continue
+  install_file "$SRC_PY" "$TARGET/src/$(basename "$SRC_PY")"
+done
 install_file "$REPO_ROOT/scripts/translate_book.py" "$TARGET/scripts/translate_book.py"
 install_file "$REPO_ROOT/requirements.txt" "$TARGET/requirements.txt"
+install_file "$REPO_ROOT/requirements-optional.txt" "$TARGET/requirements-optional.txt"
 
 if [ "$HOST" = "claude" ]; then
   printf 'Claude Code adapter:\n'
