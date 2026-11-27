@@ -100,11 +100,9 @@ class ArabicProcessor:
         if not self.orthography_normalization:
             return text
 
-        # Normalize alef variants to plain alef (ا)
-        for variant in self.ALEF_VARIANTS:
-            text = text.replace(variant, "ا")
-
-        # Normalize ya variants to ي
+        # Hamza-bearing alef variants are distinct letters in names (أحمد، إبراهيم،
+        # آمنة). Collapsing them would corrupt proper nouns, so only the final ya
+        # variant is normalized.
         for variant in self.YA_VARIANTS:
             text = text.replace(variant, "ي")
 

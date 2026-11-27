@@ -26,10 +26,12 @@ class TestArabicProcessor:
         assert self.proc.is_arabic("Hello مرحبا") is True
 
     def test_normalize_orthography(self):
-        text = "أ Machado إ input"
+        text = "أ Machado إ input ى"
         result = self.proc.normalize_orthography(text)
-        assert "أ" not in result
-        assert "إ" not in result
+        assert "أ" in result  # proper nouns must keep their hamza
+        assert "إ" in result
+        assert "ى" not in result
+        assert "ي" in result
 
     def test_remove_diacritics(self):
         assert self.proc.remove_diacritics("مُسْلِمٌ") == "مسلم"
@@ -67,7 +69,7 @@ class TestArabicProcessor:
         assert is_arabic_text("مرحبا") is True
         assert is_arabic_text("Hello") is False
         assert remove_arabic_diacritics("مُسْلِمٌ") == "مسلم"
-        assert "أ" not in normalize_arabic("أهلاً")
+        assert "أ" in normalize_arabic("أهلاً")  # hamza in names is preserved
 
     # --- Review Focus: protected spans ---------------------------------
     def test_extract_protected_spans_verbatim(self):

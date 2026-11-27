@@ -235,7 +235,11 @@ class BookTranslator:
         if self.manifest_path.exists():
             with open(self.manifest_path, encoding="utf-8") as f:
                 data = json.load(f)
-                self.manifest = [ChapterManifest(**m) for m in data]
+                if isinstance(data, dict):
+                    data = data.get("chapters", [])
+                self.manifest = [
+                    ChapterManifest(**entry) for entry in data if isinstance(entry, dict)
+                ]
 
     def _save_registries(self) -> None:
         """Persist all registries, including the dynamic glossary."""

@@ -456,9 +456,10 @@ class TranslationPipeline:
         """Extract proper names/acronyms with local registry type hints."""
         entities: list[dict[str, Any]] = []
         seen: set[str] = set()
-        candidates = re.findall(r"\b[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*\b|\b[A-Z]{2,}\b", text)
+        STOPWORDS = {"the", "a", "an", "it", "he", "she", "this", "that", "in", "on", "at", "use"}
+        candidates = re.findall(r"\b[A-Z][a-z]+\b|\b[A-Z]{2,}\b", text)
         for name in candidates:
-            if name.lower() in seen:
+            if name.lower() in seen or name.lower() in STOPWORDS:
                 continue
             seen.add(name.lower())
             kind = self._entities_cache.get(name.lower())
@@ -495,6 +496,23 @@ class TranslationPipeline:
     # ------------------------------------------------------------------
     # Stage 2: Brief — seven prompts, verbatim placeholders
     # ------------------------------------------------------------------
+    def _brief_glossary_terms(self, source: str, analysis: AnalysisResult) -> list[dict[str, str]]:
+        """Approved term pairs oriented for the brief's target language."""
+        if self.target_lang != "en":
+            return self.glossary.get_relevant_terms(source, analysis.domain)
+        terms: list[dict[str, str]] = []
+        lowered = source.lower()
+        for term in self.glossary.terms:
+            ar = term.get("ar", term.get("target", ""))
+            en = term.get("en", term.get("source", ""))
+            if not ar or not en:
+                continue
+            if ar.lower() in lowered or re.search(
+                r"(?<!\w)" + re.escape(en.lower()) + r"(?!\w)", lowered
+            ):
+                terms.append({"en": en, "ar": ar, "domain": term.get("domain", "")})
+        return terms
+
     def build_brief(
         self,
         source_text: str,
@@ -511,9 +529,14 @@ class TranslationPipeline:
         """
         source = source_text or ""
         analysis = _analysis or self.analyze(source, domain_hint)
-        spans = self.arabic.extract_protected_spans(source)
+        spans: list[str] = []
+        for span in self.arabic.extract_protected_spans(source):
+            if set(span.strip()) == {"`"}:
+                continue  # bare fence delimiter, not protected content
+            if span not in spans:
+                spans.append(span)
         placeholder_map = _PlaceholderMap({f"PH_{i}": span for i, span in enumerate(spans)})
-        glossary_terms = self.glossary.get_relevant_terms(source, analysis.domain)
+        glossary_terms = self._brief_glossary_terms(source, analysis)
         style_profile = {
             "source_lang": self.source_lang,
             "target_lang": self.target_lang,
@@ -645,12 +668,17 @@ class TranslationPipeline:
                     span=span,
                 )
 
+        target_lang = _mapping(brief.get("style_profile")).get("target_lang", self.target_lang)
         required: dict[str, list[str]] = {}
         for term in brief.get("glossary_terms", []) or []:
-            source_term = term.get("en", term.get("source", ""))
-            targets = [term.get(k, "") for k in ("ar", "target", "arabic") if term.get(k)]
-            if source_term and targets:
-                required.setdefault(source_term.lower(), []).extend(targets)
+            en = term.get("en", term.get("source", ""))
+            ar = term.get("ar", term.get("target", term.get("arabic", "")))
+            if not en or not ar:
+                continue
+            if target_lang == "en":
+                required.setdefault(ar.lower(), []).append(en)
+            else:
+                required.setdefault(en.lower(), []).append(ar)
         for source_term, targets in required.items():
             if not any(target in translation for target in targets):
                 add(
@@ -716,7 +744,7 @@ class TranslationPipeline:
         ]
         result.llm_response = None
 
-        glossary_terms = self.glossary.get_relevant_terms(source_text, analysis.domain)
+        glossary_terms = self._brief_glossary_terms(source_text, analysis)
         dict_definitions: list[dict[str, Any]] = []
         for term in analysis.difficult_terms[:5]:
             entry = self.dictionary.lookup_definition(term, dictionary="wordnet")

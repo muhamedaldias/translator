@@ -42,6 +42,11 @@ def test_installer_ships_runtime_dependencies(tmp_path: Path) -> None:
         "src/book.py",
         "src/book_formats.py",
         "scripts/translate_book.py",
+        "scripts/install.sh",
+        "scripts/install_skill.sh",
+        "commands/translate.md",
+        ".claude-plugin/plugin.json",
+        "data/manifest.json",
         "requirements.txt",
         "requirements-optional.txt",
     ]

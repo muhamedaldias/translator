@@ -45,9 +45,9 @@ This guide governs typography and formatting for every English↔Arabic stage in
 - Follow `style_profile.diacritics_policy`:
   - `retain` — keep diacritics present in the source; do not add new ones.
   - `remove` — strip all diacritics from the Arabic output; normalise the underlying letters.
-  - `automatic` — omit diacritics by default, add them only to disambiguate a genuinely ambiguous form, and be consistent across the document.
+  - `optional` — omit diacritics by default, add them only to disambiguate a genuinely ambiguous form, and be consistent across the document.
 - MSA is the default register; dialect only on explicit request. When omitting diacritics, still respect the six CLDR plural forms and the mandatory dual in MSA.
-- Orthography normalisation: alef variants (أ إ آ ا), ya variants (ي ى) and ta-marbuta (ة ه) follow the project's normalisation table in `config/translator.yaml`.
+- Orthography normalisation: the final-ya variant (ى) is normalised to (ي); hamza-bearing alef letters (أ إ آ) are preserved because they distinguish proper names. Ta-marbuta (ة ه) is left context-dependent.
 
 ## 7. Terminology
 

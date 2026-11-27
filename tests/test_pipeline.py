@@ -202,10 +202,12 @@ class TestTranslationPipeline:
         analysis = self.pipeline.analyze("مرحبا")
         draft = "الإسلامُ مُسْلِمٌ"
         result = self.pipeline.post_edit(draft, analysis)
-        assert "إ" not in result.revised_translation
-        assert result.revised_translation == "الاسلام مسلم"
+        assert "إ" in result.revised_translation
+        assert result.revised_translation == "الإسلام مسلم"
         assert result.diacritics_applied is True
-        assert any(c["reason"] == "orthography" for c in result.corrections)
+        # Hamza-bearing alef is preserved now, so no orthography correction is
+        # expected for this draft; orthography corrections apply to ى only.
+        assert all(c["reason"] != "orthography" for c in result.corrections)
         assert any(c["reason"] == "diacritics" for c in result.corrections)
 
     def test_review_uses_configured_thresholds(self):
@@ -263,6 +265,38 @@ class TestTranslationPipeline:
         err = capsys.readouterr().err
         assert "no-op" in err.lower()
         assert "dummy" not in err
+
+    def test_reverse_target_validates_english_terms(self):
+        pipeline = TranslationPipeline(target_lang="en")
+        try:
+            source = 'الحاسوب جاهز. {"id": 7}'
+            brief = pipeline.build_brief(source)
+            assert brief["style_profile"]["target_lang"] == "en"
+            assert any(t.get("en") == "computer" for t in brief["glossary_terms"])
+            good = 'The computer is ready. {"id": 7}'
+            assert pipeline.validate(good, brief)["passed"] is True
+            bad = 'The device is ready. {"id": 7}'
+            result = pipeline.validate(bad, brief)
+            assert result["passed"] is False
+            assert any(i["name"] == "glossary_term_missing" for i in result["issues"])
+        finally:
+            pipeline.close()
+
+    def test_placeholder_map_has_no_duplicate_or_bare_fence_spans(self):
+        brief = self.pipeline.build_brief("```python\nx = 1\n```\n\n{{term}} and {{term}}")
+        spans = list(brief["placeholder_map"].values())
+        assert len(spans) == len(set(spans))
+        assert all(set(span.strip()) != {"`"} for span in spans)
+        assert any("x = 1" in span for span in spans)
+
+    def test_entities_skip_stopwords_and_newlines(self):
+        result = self.pipeline.analyze("The book is open. It belongs to John Smith in Paris.")
+        texts = [entity["text"] for entity in result.entities]
+        assert "The" not in texts
+        assert "It" not in texts
+        assert "John" in texts
+        assert "Smith" in texts
+        assert "Paris" in texts
 
 
 if __name__ == "__main__":
