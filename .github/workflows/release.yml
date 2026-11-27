@@ -1,0 +1,41 @@
+name: Release
+
+# Continuous packaging: every tag v* becomes a downloadable, key-free skill pack.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: build and publish skill pack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build the portable pack archive
+        run: |
+          mkdir -p build
+          zip -q -r build/translator-skill-pack.zip \
+            skills agents commands docs config data src scripts \
+            .claude-plugin README.md AGENTS.md CLAUDE.md GLOSSARY.md \
+            requirements.txt requirements-optional.txt requirements-dev.txt pyproject.toml
+          unzip -l build/translator-skill-pack.zip | tail -3
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: translator-skill-pack
+          path: build/translator-skill-pack.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/translator-skill-pack.zip
+          generate_release_notes: true

@@ -8,7 +8,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.glossary import Glossary
 
-
 NAMESPACED_TBX = """<?xml version="1.0" encoding="UTF-8"?>
 <tbx xmlns="urn:iso:std:iso:30042:ed-2" version="2.0" lang="en">
   <termEntry id="1">
@@ -29,6 +28,30 @@ LEGACY_TBX = """<?xml version="1.0" encoding="UTF-8"?>
   <termEntry>
     <langSec lang="en"><term>server</term></langSec>
     <langSec lang="ar"><term>خادم</term></langSec>
+  </termEntry>
+</tbx>
+"""
+
+# Provenance descrip elements nested inside BOTH language sections. The parser
+# must surface them on the returned term dict without dropping the existing
+# subjectField -> domain mapping.
+PROVENANCE_TBX = """<?xml version="1.0" encoding="UTF-8"?>
+<tbx version="2.0" lang="en">
+  <termEntry id="1">
+    <langSec lang="en">
+      <term>computer</term>
+      <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
+    </langSec>
+    <langSec lang="ar">
+      <term>حاسوب</term>
+      <descrip type="subjectField">technology</descrip>
+      <descrip type="source">curated</descrip>
+      <descrip type="license">project-curated</descrip>
+      <descrip type="confidence">high</descrip>
+    </langSec>
   </termEntry>
 </tbx>
 """
@@ -89,7 +112,63 @@ class TestGlossary:
         else:
             raise AssertionError("expected ValueError for unsupported format")
 
+    def test_mixed_domain_keeps_technical_terms(self, tmp_path):
+        # A literary book that mentions a computer must still receive the
+        # approved technology term; domain must never silently drop terms.
+        g = Glossary(
+            _write(
+                tmp_path,
+                "g.tbx",
+                (
+                    '<?xml version="1.0"?><tbx version="2.0" lang="en">'
+                    '<termEntry id="1">'
+                    '<langSec lang="en"><term>computer</term>'
+                    '<descrip type="subjectField">technology</descrip></langSec>'
+                    '<langSec lang="ar"><term>حاسوب</term>'
+                    '<descrip type="subjectField">technology</descrip></langSec>'
+                    "</termEntry></tbx>"
+                ),
+            )
+        )
+        for domain in ("general", "literary", "technology"):
+            terms = g.get_relevant_terms("The computer is ready", domain)
+            assert len(terms) == 1, (domain, terms)
+            assert terms[0]["ar"] == "حاسوب"
+
+    def test_descrip_provenance_from_both_language_sections(self, tmp_path):
+        g = Glossary(_write(tmp_path, "prov.tbx", PROVENANCE_TBX))
+        assert len(g.terms) == 1
+        term = g.terms[0]
+        assert term["source"] == "curated"
+        assert term["license"] == "project-curated"
+        assert term["confidence"] == "high"
+        assert term["domain"] == "technology"  # existing behaviour preserved
+
+    def test_arbitrary_descrip_types_captured(self, tmp_path):
+        text = (
+            '<?xml version="1.0"?><tbx version="2.0" lang="en">'
+            '<termEntry id="1">'
+            '<langSec lang="en"><term>computer</term>'
+            '<descrip type="note">reviewed by lexicographer</descrip></langSec>'
+            '<langSec lang="ar"><term>حاسوب</term>'
+            '<descrip type="note">reviewed by lexicographer</descrip></langSec>'
+            "</termEntry></tbx>"
+        )
+        g = Glossary(_write(tmp_path, "note.tbx", text))
+        assert g.terms[0]["note"] == "reviewed by lexicographer"
+
+    def test_shipped_glossary_loads_ten_terms_with_provenance(self):
+        data_path = os.path.join(os.path.dirname(__file__), "..", "data", "glossary.tbx")
+        g = Glossary(data_path)
+        assert len(g) == 10
+        assert g.get("computer") == "حاسوب"
+        for term in g.terms:
+            assert term["source"] == "curated"
+            assert term["license"] == "project-curated"
+            assert term["confidence"] == "high"
+
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

@@ -8,9 +8,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.arabic import (
     ArabicProcessor,
+    is_arabic_text,
     normalize_arabic,
     remove_arabic_diacritics,
-    is_arabic_text,
 )
 
 
@@ -26,10 +26,12 @@ class TestArabicProcessor:
         assert self.proc.is_arabic("Hello مرحبا") is True
 
     def test_normalize_orthography(self):
-        text = "أ Machado إ input"
+        text = "أ Machado إ input ى"
         result = self.proc.normalize_orthography(text)
-        assert "أ" not in result
-        assert "إ" not in result
+        assert "أ" in result  # proper nouns must keep their hamza
+        assert "إ" in result
+        assert "ى" not in result
+        assert "ي" in result
 
     def test_remove_diacritics(self):
         assert self.proc.remove_diacritics("مُسْلِمٌ") == "مسلم"
@@ -44,7 +46,12 @@ class TestArabicProcessor:
 
     def test_plural_form(self):
         assert [self.proc.get_plural_form(n) for n in (0, 1, 2, 5, 50, 100)] == [
-            "zero", "one", "two", "few", "many", "other"
+            "zero",
+            "one",
+            "two",
+            "few",
+            "many",
+            "other",
         ]
 
     def test_detect_register_msa(self):
@@ -55,14 +62,14 @@ class TestArabicProcessor:
 
     def test_rtl_markers(self):
         marked = self.proc.add_rtl_markers("مرحبا بالعالم")
-        assert "\u202B" in marked and "\u202C" in marked
+        assert "\u202b" in marked and "\u202c" in marked
         assert self.proc.remove_rtl_markers(marked) == "مرحبا بالعالم"
 
     def test_convenience_functions(self):
         assert is_arabic_text("مرحبا") is True
         assert is_arabic_text("Hello") is False
         assert remove_arabic_diacritics("مُسْلِمٌ") == "مسلم"
-        assert "أ" not in normalize_arabic("أهلاً")
+        assert "أ" in normalize_arabic("أهلاً")  # hamza in names is preserved
 
     # --- Review Focus: protected spans ---------------------------------
     def test_extract_protected_spans_verbatim(self):
@@ -93,4 +100,5 @@ class TestArabicProcessor:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

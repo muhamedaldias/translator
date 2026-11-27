@@ -17,7 +17,7 @@ Handles Arabic-specific challenges:
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ArabicProcessor:
@@ -33,12 +33,12 @@ class ArabicProcessor:
     TA_MARBUTA_VARIANTS = ["ة", "ه"]
 
     # Arabic diacritics (tashkīl)
-    DIACRITICS = re.compile(
-        r"[\u064B-\u065F\u0670\u0640]"  # harakat + tatweel
-    )
+    DIACRITICS = re.compile(r"[\u064B-\u065F\u0670\u0640]")  # harakat + tatweel
 
     # Arabic Unicode range
-    ARABIC_RANGE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
+    ARABIC_RANGE = re.compile(
+        r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]"
+    )
 
     # 6 Arabic plural forms (CLDR)
     PLURAL_FORMS = ["zero", "one", "two", "few", "many", "other"]
@@ -47,11 +47,11 @@ class ArabicProcessor:
     # the double-brace placeholder and the backtick span are matched *before*
     # their XML/JSON-like contents so nested-looking syntax stays one span.
     PROTECTED_SPAN_RE = re.compile(
-        r"\{\{[^{}]*\}\}"     # {{placeholder}}
-        r"|`[^`]*`"           # `inline code`
-        r"|\$\{[^}]*\}"       # ${variable}
-        r"|<[^<>]+>"          # <xml tag attr="...">
-        r"|\{[^{}]*\}"        # {"json": "like span"}
+        r"\{\{[^{}]*\}\}"  # {{placeholder}}
+        r"|`[^`]*`"  # `inline code`
+        r"|\$\{[^}]*\}"  # ${variable}
+        r"|<[^<>]+>"  # <xml tag attr="...">
+        r"|\{[^{}]*\}"  # {"json": "like span"}
     )
 
     def __init__(self) -> None:
@@ -75,7 +75,13 @@ class ArabicProcessor:
         # Dialect tends to use clitics, circumfix negation, etc.
         # This is a placeholder — real implementation uses trained models.
         dialect_markers = [
-            "شو", "كيفك", "أخبارك", "إيه", "يا ريت", "wallah", "älhamdulillah",
+            "شو",
+            "كيفك",
+            "أخبارك",
+            "إيه",
+            "يا ريت",
+            "wallah",
+            "älhamdulillah",
         ]
         msa_markers = ["لقد", "قد", "إلى", "على", "من", "في", "هذا", "يمكن", "الذي"]
 
@@ -94,11 +100,9 @@ class ArabicProcessor:
         if not self.orthography_normalization:
             return text
 
-        # Normalize alef variants to plain alef (ا)
-        for variant in self.ALEF_VARIANTS:
-            text = text.replace(variant, "ا")
-
-        # Normalize ya variants to ي
+        # Hamza-bearing alef variants are distinct letters in names (أحمد، إبراهيم،
+        # آمنة). Collapsing them would corrupt proper nouns, so only the final ya
+        # variant is normalized.
         for variant in self.YA_VARIANTS:
             text = text.replace(variant, "ي")
 
@@ -118,7 +122,7 @@ class ArabicProcessor:
         """Return True when the text contains Arabic diacritics/tatweel."""
         return bool(self.DIACRITICS.search(text))
 
-    def extract_protected_spans(self, text: str) -> List[str]:
+    def extract_protected_spans(self, text: str) -> list[str]:
         """Return every verbatim placeholder/code/tag/JSON span, in order.
 
         A backtick span swallows any XML-looking text inside it, so each
@@ -159,7 +163,7 @@ class ArabicProcessor:
         else:
             return "other"
 
-    def format_plural(self, singular: str, count: int, dual: Optional[str] = None) -> str:
+    def format_plural(self, singular: str, count: int, dual: str | None = None) -> str:
         """Format Arabic word with correct plural form."""
         form = self.get_plural_form(count)
         if form == "one":
@@ -179,7 +183,7 @@ class ArabicProcessor:
         subject_gender: str,
         object_gender: str,
         verb_form: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Check Arabic gender agreement between subject, object, and verb."""
         issues = []
 
@@ -193,12 +197,14 @@ class ArabicProcessor:
         }
 
         if (subject_gender, object_gender) not in valid_combinations:
-            issues.append({
-                "type": "gender_agreement",
-                "subject": subject_gender,
-                "object": object_gender,
-                "verb": verb_form,
-            })
+            issues.append(
+                {
+                    "type": "gender_agreement",
+                    "subject": subject_gender,
+                    "object": object_gender,
+                    "verb": verb_form,
+                }
+            )
 
         return {
             "agreed": len(issues) == 0,
@@ -224,25 +230,23 @@ class ArabicProcessor:
     def add_rtl_markers(self, text: str) -> str:
         """Add RTL embedding markers for Arabic text."""
         if self.contains_arabic(text):
-            return f"\u202B{text}\u202C"  # RLE ... PDF
+            return f"\u202b{text}\u202c"  # RLE ... PDF
         return text
 
     def remove_rtl_markers(self, text: str) -> str:
         """Remove RTL embedding markers."""
-        return text.replace("\u202B", "").replace("\u202C", "")
+        return text.replace("\u202b", "").replace("\u202c", "")
 
     # ------------------------------------------------------------------
     # Code Block Protection
     # ------------------------------------------------------------------
-    def protect_code_blocks(self, text: str) -> tuple[str, List[str]]:
+    def protect_code_blocks(self, text: str) -> tuple[str, list[str]]:
         """Extract code blocks for protection during translation."""
         blocks = self.extract_protected_spans(text)
         protected = self.PROTECTED_SPAN_RE.sub("___CODE_BLOCK___", text)
         return protected, blocks
 
-    def restore_code_blocks(
-        self, text: str, blocks: List[str]
-    ) -> str:
+    def restore_code_blocks(self, text: str, blocks: list[str]) -> str:
         """Restore code blocks after translation."""
         for block in blocks:
             text = text.replace("___CODE_BLOCK___", block, 1)

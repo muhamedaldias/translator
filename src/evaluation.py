@@ -16,11 +16,11 @@ import math
 import os
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import nltk  # type: ignore
-    from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+    from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
 except Exception:  # pragma: no cover - optional dependency
     nltk = None  # type: ignore
     sentence_bleu = None  # type: ignore
@@ -72,9 +72,7 @@ class TranslationEvaluator:
         recall = common / sum(reference.values())
         if precision + recall == 0:
             return 0.0
-        return (
-            (1 + beta ** 2) * precision * recall / (beta ** 2 * precision + recall)
-        ) * 100
+        return ((1 + beta**2) * precision * recall / (beta**2 * precision + recall)) * 100
 
     # ------------------------------------------------------------------
     # chrF — character n-gram F-score (robust for Arabic morphology)
@@ -180,7 +178,7 @@ class TranslationEvaluator:
         )
         return min(100.0, bp * mean_precision * 100)
 
-    def _token_ngrams(self, tokens: List[str], order: int) -> Counter:
+    def _token_ngrams(self, tokens: list[str], order: int) -> Counter:
         """Extract token n-grams (kept for compatibility)."""
         return self._ngrams(tokens, order)
 
@@ -198,10 +196,7 @@ class TranslationEvaluator:
             return 100.0
         base_bleu = self.bleu(reference, hypothesis)
         char_chrf = self.chrf(reference, hypothesis, word_order=0)
-        return (
-            self.AL_BLEU_BLEU_WEIGHT * base_bleu
-            + self.AL_BLEU_CHRF_WEIGHT * char_chrf
-        )
+        return self.AL_BLEU_BLEU_WEIGHT * base_bleu + self.AL_BLEU_CHRF_WEIGHT * char_chrf
 
     # ------------------------------------------------------------------
     # TSR — Term Success Rate
@@ -209,29 +204,22 @@ class TranslationEvaluator:
     def tsr(
         self,
         translation: str,
-        glossary_terms: List[Dict[str, str]],
+        glossary_terms: list[dict[str, str]],
     ) -> float:
         """Compute Term Success Rate: % of glossary terms correctly used."""
         if not glossary_terms:
             return 100.0
 
-        required: Dict[str, List[str]] = {}
+        required: dict[str, list[str]] = {}
         for term in glossary_terms:
             source = term.get("en", term.get("source", ""))
-            targets = [
-                value
-                for key in ("ar", "target", "arabic")
-                if (value := term.get(key, ""))
-            ]
+            targets = [value for key in ("ar", "target", "arabic") if (value := term.get(key, ""))]
             if source and targets:
                 required.setdefault(source.lower(), []).extend(targets)
         if not required:
             return 100.0
 
-        found = sum(
-            1 for targets in required.values()
-            if any(t in translation for t in targets)
-        )
+        found = sum(1 for targets in required.values() if any(t in translation for t in targets))
         return (found / len(required)) * 100
 
     # ------------------------------------------------------------------
@@ -240,9 +228,9 @@ class TranslationEvaluator:
     def comet_mqm(
         self,
         source: str,
-        reference: Optional[str],
+        reference: str | None,
         hypothesis: str,
-    ) -> Optional[float]:
+    ) -> float | None:
         """Return a COMET-MQM score only when a LOCAL checkpoint is available.
 
         This function never downloads a model and never makes a network call.
@@ -286,12 +274,12 @@ class TranslationEvaluator:
     def evaluate(
         self,
         source: str,
-        reference: Optional[str],
+        reference: str | None,
         hypothesis: str,
-        glossary_terms: Optional[List[Dict[str, str]]] = None,
-    ) -> Dict[str, Any]:
+        glossary_terms: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
         """Run all local metrics and return an honest assessment."""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         result["bleu"] = self.bleu(reference or "", hypothesis)
         result["chrf"] = self.chrf(reference or "", hypothesis)

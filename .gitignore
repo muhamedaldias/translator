@@ -45,6 +45,8 @@ Thumbs.db
 # Project specific
 outputs/
 *.log
+.coverage
+.coverage.*
 .env
 .secret
 
@@ -56,7 +58,9 @@ outputs/*.pdf
 # Glossary data (JSON output from tool)
 data/glossary.json
 
-# Dictionary cache
+# Dictionary cache and opt-in downloaded lexicons (regenerate, do not commit)
 data/cache/
+data/dictionaries/
+!data/dictionaries/.gitkeep
 data/**/cache.db
 data/**/*.db

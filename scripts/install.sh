@@ -172,19 +172,23 @@ done
 
 printf 'Runtime support files:\n'
 install_file "$REPO_ROOT/config/translator.yaml" "$TARGET/config/translator.yaml"
+mkdir -p "$TARGET/data/dictionaries" "$TARGET/data/cache"
 for DATA_SRC in "$REPO_ROOT"/data/*.json "$REPO_ROOT"/data/*.tbx; do
   [ -f "$DATA_SRC" ] || continue
   install_file "$DATA_SRC" "$TARGET/data/$(basename "$DATA_SRC")"
 done
-install_file "$REPO_ROOT/src/pipeline.py" "$TARGET/src/pipeline.py"
+for SRC_PY in "$REPO_ROOT"/src/*.py; do
+  [ -f "$SRC_PY" ] || continue
+  install_file "$SRC_PY" "$TARGET/src/$(basename "$SRC_PY")"
+done
 install_file "$REPO_ROOT/scripts/translate_book.py" "$TARGET/scripts/translate_book.py"
 install_file "$REPO_ROOT/requirements.txt" "$TARGET/requirements.txt"
+install_file "$REPO_ROOT/requirements-optional.txt" "$TARGET/requirements-optional.txt"
 
-if [ "$HOST" = "claude" ]; then
-  printf 'Claude Code adapter:\n'
-  install_file "$REPO_ROOT/commands/translate.md" "$TARGET/commands/translate.md"
-  install_file "$REPO_ROOT/.claude-plugin/plugin.json" "$TARGET/.claude-plugin/plugin.json"
-fi
+install_file "$REPO_ROOT/scripts/install.sh" "$TARGET/scripts/install.sh"
+install_file "$REPO_ROOT/scripts/install_skill.sh" "$TARGET/scripts/install_skill.sh"
+install_file "$REPO_ROOT/commands/translate.md" "$TARGET/commands/translate.md"
+install_file "$REPO_ROOT/.claude-plugin/plugin.json" "$TARGET/.claude-plugin/plugin.json"
 
 printf '\n'
 if [ "$DRY_RUN" -eq 1 ]; then

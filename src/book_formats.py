@@ -30,13 +30,12 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ------------------------------------------------------------------
 # Optional dependency helpers (lazy + actionable errors)
 # ------------------------------------------------------------------
-_OPTIONAL_DEPS: Dict[str, str] = {
+_OPTIONAL_DEPS: dict[str, str] = {
     "ebooklib": "ebooklib beautifulsoup4",
     "bs4": "beautifulsoup4",
     "docx": "python-docx",
@@ -59,22 +58,24 @@ def _require(module_name: str) -> Any:
 @dataclass
 class BookSegment:
     """A translatable segment of a book."""
+
     id: str
     text: str
     segment_type: str = "paragraph"  # paragraph, heading, code_block, title, etc.
     chapter: int = 0
     position: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class BookStructure:
     """Parsed book structure with segments and metadata."""
+
     title: str = ""
     author: str = ""
     language: str = "en"
-    chapters: List[Dict[str, Any]] = field(default_factory=list)
-    segments: List[BookSegment] = field(default_factory=list)
+    chapters: list[dict[str, Any]] = field(default_factory=list)
+    segments: list[BookSegment] = field(default_factory=list)
     total_words: int = 0
     format: str = "txt"
 
@@ -82,7 +83,7 @@ class BookStructure:
 class BookFormatHandler(ABC):
     """Abstract base class for book format handlers."""
 
-    extensions: Tuple[str, ...] = ()
+    extensions: tuple[str, ...] = ()
 
     @classmethod
     def can_handle(cls, file_path: str) -> bool:
@@ -97,9 +98,9 @@ class BookFormatHandler(ABC):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
-        language: Optional[str] = None,
+        language: str | None = None,
     ) -> None:
         """Reconstruct the book with translated segments."""
         ...
@@ -163,14 +164,12 @@ class TextHandler(BookFormatHandler):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
-        language: Optional[str] = None,
+        language: str | None = None,
     ) -> None:
         """Reconstruct a text file with translated segments."""
-        output_segments = [
-            translations.get(seg.id, seg.text) for seg in structure.segments
-        ]
+        output_segments = [translations.get(seg.id, seg.text) for seg in structure.segments]
         output_text = "\n\n".join(output_segments)
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_text(output_text, encoding="utf-8")
@@ -231,9 +230,9 @@ class EPUBHandler(BookFormatHandler):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
-        language: Optional[str] = None,
+        language: str | None = None,
     ) -> None:
         """Reconstruct a valid EPUB: metadata language + complete spine."""
         epub = _require("ebooklib.epub")
@@ -249,7 +248,7 @@ class EPUBHandler(BookFormatHandler):
             except Exception:  # pragma: no cover - older ebooklib versions
                 pass
 
-        chapters_by_number: Dict[int, List[BookSegment]] = {}
+        chapters_by_number: dict[int, list[BookSegment]] = {}
         for seg in structure.segments:
             chapters_by_number.setdefault(seg.chapter, []).append(seg)
 
@@ -258,8 +257,8 @@ class EPUBHandler(BookFormatHandler):
             for i, c in enumerate(structure.chapters)
         }
 
-        chapter_items: List[Any] = []
-        toc: List[Any] = []
+        chapter_items: list[Any] = []
+        toc: list[Any] = []
         for chap_num, segs in sorted(chapters_by_number.items()):
             title = chapter_titles.get(chap_num) or f"Chapter {chap_num}"
             file_name = f"chap_{chap_num}.xhtml"
@@ -271,10 +270,7 @@ class EPUBHandler(BookFormatHandler):
 
             # Escape translated text before interpolating into XHTML so
             # '&', '<' and '>' cannot break the chapter markup.
-            paras = [
-                html.escape(translations.get(seg.id, seg.text), quote=False)
-                for seg in segs
-            ]
+            paras = [html.escape(translations.get(seg.id, seg.text), quote=False) for seg in segs]
             chapter.content = (
                 "<html><head><meta charset='utf-8'/></head><body>"
                 + "\n".join(f"<p>{p}</p>" for p in paras)
@@ -347,9 +343,9 @@ class DOCXHandler(BookFormatHandler):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
-        language: Optional[str] = None,
+        language: str | None = None,
     ) -> None:
         """Reconstruct DOCX with translated segments."""
         Document = _require("docx").Document
@@ -416,9 +412,9 @@ class PDFHandler(BookFormatHandler):
     def reconstruct(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
-        language: Optional[str] = None,
+        language: str | None = None,
     ) -> None:
         """Export translated text.
 
@@ -440,7 +436,7 @@ class PDFHandler(BookFormatHandler):
                 "Use .txt or .md, or a real PDF converter."
             )
 
-        output_lines: List[str] = []
+        output_lines: list[str] = []
         current_chapter = 0
         for seg in structure.segments:
             translated = translations.get(seg.id, seg.text)
@@ -457,7 +453,7 @@ class PDFHandler(BookFormatHandler):
 # ------------------------------------------------------------------
 # Handler registry
 # ------------------------------------------------------------------
-HANDLERS: List[BookFormatHandler] = [
+HANDLERS: list[BookFormatHandler] = [
     TextHandler(),
     EPUBHandler(),
     DOCXHandler(),
@@ -473,9 +469,9 @@ def get_handler(file_path: str) -> BookFormatHandler:
     raise ValueError(f"No handler available for file format: {file_path}")
 
 
-def list_supported_formats() -> List[str]:
+def list_supported_formats() -> list[str]:
     """List all supported file extensions (data-driven from handlers)."""
-    seen: List[str] = []
+    seen: list[str] = []
     for handler in HANDLERS:
         for ext in handler.extensions:
             if ext not in seen:

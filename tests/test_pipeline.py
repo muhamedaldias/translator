@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.pipeline import AnalysisResult, ReviewResult, TranslationPipeline, TranslationResult
 
 SOURCE = (
-    'Chapter 1. Alice met Bob in Paris. Use {{api_key}} and `code --flag <x>` '
+    "Chapter 1. Alice met Bob in Paris. Use {{api_key}} and `code --flag <x>` "
     'with <tag attr="v"> plus {"id": 7} and ${VAR}. She said: "مرحبا بالعالم".'
 )
 SPANS = [
@@ -19,9 +19,7 @@ SPANS = [
     '{"id": 7}',
     "${VAR}",
 ]
-ROLES = [
-    "analysis", "translator", "postedit", "reviewer", "editor", "judge", "consistency"
-]
+ROLES = ["analysis", "translator", "postedit", "reviewer", "editor", "judge", "consistency"]
 
 
 def _pipeline(tmp_path=None, config_text=None):
@@ -65,7 +63,9 @@ class TestTranslationPipeline:
 
     def test_empty_source_still_builds_brief(self):
         brief = self.pipeline.build_brief("   ")
-        assert set(["analysis", "glossary_terms", "placeholder_map", "agent_prompts", "style_profile"]) <= set(brief)
+        assert set(
+            ["analysis", "glossary_terms", "placeholder_map", "agent_prompts", "style_profile"]
+        ) <= set(brief)
         assert len(brief["agent_prompts"]) == 7
 
     # --- Review Focus: real entities / gender / code blocks -------------
@@ -83,10 +83,8 @@ class TestTranslationPipeline:
         assert result.register == "dialect"
 
     def test_code_blocks_detected_in_indented_paragraph(self):
-        text = "    <para id=\"7\">hello</para>\n\t{{token}}"
-        assert self.pipeline.analyze(text).code_blocks == [
-            "<para id=\"7\">", "</para>", "{{token}}"
-        ]
+        text = '    <para id="7">hello</para>\n\t{{token}}'
+        assert self.pipeline.analyze(text).code_blocks == ['<para id="7">', "</para>", "{{token}}"]
 
     # --- Review Focus: build_brief preserves all protected spans --------
     def test_build_brief_returns_seven_ordered_prompts(self):
@@ -112,7 +110,9 @@ class TestTranslationPipeline:
             SOURCE, domain_hint="literary", previous_context="Chapter 0 introduced Alice."
         )
         assert "Chapter 0 introduced Alice." in brief["agent_prompts"]["translator"]
-        result = self.pipeline.translate(SOURCE, self.pipeline.analyze(SOURCE), previous_context="Chapter 0")
+        result = self.pipeline.translate(
+            SOURCE, self.pipeline.analyze(SOURCE), previous_context="Chapter 0"
+        )
         assert isinstance(result, TranslationResult)
 
     # --- Review Focus: validation catches missing placeholders ----------
@@ -171,8 +171,13 @@ class TestTranslationPipeline:
         try:
             assert pipeline.config_errors == []
             assert (pipeline.quality_threshold, pipeline.revise_threshold) == (95, 60)
-            review = ReviewResult(overall_score=90, dimension_scores={k: 90 for k in
-                ("accuracy", "fluency", "style_register", "terminology", "coherence")})
+            review = ReviewResult(
+                overall_score=90,
+                dimension_scores={
+                    k: 90
+                    for k in ("accuracy", "fluency", "style_register", "terminology", "coherence")
+                },
+            )
             assert pipeline.judge("x", review).decision == "revise"
             review.overall_score = 96
             assert pipeline.judge("x", review).decision == "approve"
@@ -197,10 +202,12 @@ class TestTranslationPipeline:
         analysis = self.pipeline.analyze("مرحبا")
         draft = "الإسلامُ مُسْلِمٌ"
         result = self.pipeline.post_edit(draft, analysis)
-        assert "إ" not in result.revised_translation
-        assert result.revised_translation == "الاسلام مسلم"
+        assert "إ" in result.revised_translation
+        assert result.revised_translation == "الإسلام مسلم"
         assert result.diacritics_applied is True
-        assert any(c["reason"] == "orthography" for c in result.corrections)
+        # Hamza-bearing alef is preserved now, so no orthography correction is
+        # expected for this draft; orthography corrections apply to ى only.
+        assert all(c["reason"] != "orthography" for c in result.corrections)
         assert any(c["reason"] == "diacritics" for c in result.corrections)
 
     def test_review_uses_configured_thresholds(self):
@@ -208,7 +215,9 @@ class TestTranslationPipeline:
         review = self.pipeline.review("مرحبا بالعالم", "Hello world", analysis)
         assert isinstance(review.overall_score, int) and 0 <= review.overall_score <= 100
         assert review.recommendation in ("approve", "revise", "retranslate")
-        assert (review.overall_score >= self.pipeline.approve_threshold) == (review.recommendation == "approve")
+        assert (review.overall_score >= self.pipeline.approve_threshold) == (
+            review.recommendation == "approve"
+        )
 
     # --- Review Focus: no fake translation, no LLM ----------------------
     def test_run_without_host_translation_is_explicit(self):
@@ -231,22 +240,66 @@ class TestTranslationPipeline:
 
     def test_no_llm_symbols_in_pipeline(self):
         import inspect
+
         import src.pipeline as pipeline_module
+
         src = inspect.getsource(pipeline_module)
-        for symbol in ("_llm_complete", "llm_client", "LLMManager", "LLMResponse", "download_model"):
+        for symbol in (
+            "_llm_complete",
+            "llm_client",
+            "LLMManager",
+            "LLMResponse",
+            "download_model",
+        ):
             assert symbol not in src
 
     def test_legacy_cli_flags_warn_as_noop(self, capsys, monkeypatch):
         import src.pipeline as pipeline_module
-        monkeypatch.setattr(sys, "argv", [
-            "pipeline.py", "--source", "Hello world", "--use-llm", "--llm-api-key", "dummy"
-        ])
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["pipeline.py", "--source", "Hello world", "--use-llm", "--llm-api-key", "dummy"],
+        )
         pipeline_module.main()
         err = capsys.readouterr().err
         assert "no-op" in err.lower()
         assert "dummy" not in err
 
+    def test_reverse_target_validates_english_terms(self):
+        pipeline = TranslationPipeline(target_lang="en")
+        try:
+            source = 'الحاسوب جاهز. {"id": 7}'
+            brief = pipeline.build_brief(source)
+            assert brief["style_profile"]["target_lang"] == "en"
+            assert any(t.get("en") == "computer" for t in brief["glossary_terms"])
+            good = 'The computer is ready. {"id": 7}'
+            assert pipeline.validate(good, brief)["passed"] is True
+            bad = 'The device is ready. {"id": 7}'
+            result = pipeline.validate(bad, brief)
+            assert result["passed"] is False
+            assert any(i["name"] == "glossary_term_missing" for i in result["issues"])
+        finally:
+            pipeline.close()
+
+    def test_placeholder_map_has_no_duplicate_or_bare_fence_spans(self):
+        brief = self.pipeline.build_brief("```python\nx = 1\n```\n\n{{term}} and {{term}}")
+        spans = list(brief["placeholder_map"].values())
+        assert len(spans) == len(set(spans))
+        assert all(set(span.strip()) != {"`"} for span in spans)
+        assert any("x = 1" in span for span in spans)
+
+    def test_entities_skip_stopwords_and_newlines(self):
+        result = self.pipeline.analyze("The book is open. It belongs to John Smith in Paris.")
+        texts = [entity["text"] for entity in result.entities]
+        assert "The" not in texts
+        assert "It" not in texts
+        assert "John" in texts
+        assert "Smith" in texts
+        assert "Paris" in texts
+
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

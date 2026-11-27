@@ -25,7 +25,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 
 from src.book_formats import BookStructure, get_handler, list_supported_formats
 from src.pipeline import TranslationPipeline
@@ -35,14 +35,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _ARABIC_TOKEN_RE = re.compile(r"[\u0600-\u06FF]+")
 _PLACEHOLDER_PATTERNS = (
-    r"\{\{[^}]+\}\}",          # {{token}}
-    r"`[^`]+`",                # `code`
-    r"<[^>]+>",                # <xml/>
+    r"\{\{[^}]+\}\}",  # {{token}}
+    r"`[^`]+`",  # `code`
+    r"<[^>]+>",  # <xml/>
     r"\{\s*\"[^\"]+\"\s*:\s*[^}]+\}",  # {"id": 7}
 )
 
 
-def _to_dict(value: Any) -> Optional[Dict[str, Any]]:
+def _to_dict(value: Any) -> dict[str, Any] | None:
     """Best-effort conversion of a dataclass/object to a plain dict."""
     if value is None:
         return None
@@ -55,7 +55,7 @@ def _to_dict(value: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _arabic_tokens(text: str) -> List[str]:
+def _arabic_tokens(text: str) -> list[str]:
     return _ARABIC_TOKEN_RE.findall(text or "")
 
 
@@ -78,25 +78,25 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _near_renderings(text: str, canonical: str) -> List[str]:
+def _near_renderings(text: str, canonical: str) -> list[str]:
     """Arabic sequences that start like ``canonical`` but differ from it."""
     canon = _arabic_tokens(canonical)
     if not canon:
         return []
     words = _arabic_tokens(text)
-    found: List[str] = []
+    found: list[str] = []
     for i, word in enumerate(words):
         if word != canon[0]:
             continue
-        seq = " ".join(words[i:i + len(canon)])
+        seq = " ".join(words[i : i + len(canon)])
         if seq != canonical and seq not in found:
             found.append(seq)
     return found
 
 
-def _extract_placeholders(source_text: str) -> Dict[str, str]:
+def _extract_placeholders(source_text: str) -> dict[str, str]:
     """Map every verbatim placeholder found in ``source_text`` to itself."""
-    found: Dict[str, str] = {}
+    found: dict[str, str] = {}
     for pattern in _PLACEHOLDER_PATTERNS:
         for token in re.findall(pattern, source_text or ""):
             found[token] = token
@@ -111,7 +111,7 @@ def _chapter_slug(chapter_id: Any) -> str:
     return re.sub(r"\W+", "_", str(chapter_id)).strip("_") or "000"
 
 
-def _judge_score(result: Any) -> Optional[int]:
+def _judge_score(result: Any) -> int | None:
     """Read a judge score from either a JudgeResult dataclass or a dict."""
     if not isinstance(result, dict):
         return None
@@ -138,9 +138,9 @@ def _approved(result: Any) -> bool:
 @dataclass
 class CharacterEntry:
     name: str
-    aliases: List[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
     arabic_name: str = ""
-    arabic_aliases: List[str] = field(default_factory=list)
+    arabic_aliases: list[str] = field(default_factory=list)
     pronouns: str = "neutral"
     title: str = ""
     first_chapter: int = 0
@@ -163,8 +163,8 @@ class ChapterManifest:
     output_path: str
     checksum: str
     status: str = "pending"  # pending | translated | reviewed | completed
-    pipeline_id: Optional[str] = None
-    judge_score: Optional[int] = None
+    pipeline_id: str | None = None
+    judge_score: int | None = None
 
 
 class BookTranslator:
@@ -172,10 +172,10 @@ class BookTranslator:
 
     def __init__(
         self,
-        project_root: Optional[str] = None,
+        project_root: str | None = None,
         target_lang: str = "ar",
-        output_dir: Optional[str] = None,
-        pipeline: Optional[Any] = None,
+        output_dir: str | None = None,
+        pipeline: Any | None = None,
     ) -> None:
         if project_root is None:
             self.project_root = REPO_ROOT
@@ -197,18 +197,20 @@ class BookTranslator:
         self.briefs_dir = self.output_dir / "briefs"
         self.chapters_dir = self.output_dir / "chapters"
 
-        self.characters: List[Dict[str, Any]] = []
-        self.places: List[Dict[str, Any]] = []
-        self.manifest: List[ChapterManifest] = []
-        self.dynamic_glossary: List[Dict[str, Any]] = []
+        self.characters: list[dict[str, Any]] = []
+        self.places: list[dict[str, Any]] = []
+        self.manifest: list[ChapterManifest] = []
+        self.dynamic_glossary: list[dict[str, Any]] = []
 
         self._load_registries()
         self._load_manifest()
 
         # Dependency injection keeps tests deterministic and decouples them
         # from Task A landing during a concurrent session.
-        self.pipeline = pipeline if pipeline is not None else TranslationPipeline(
-            source_lang="en", target_lang=target_lang
+        self.pipeline = (
+            pipeline
+            if pipeline is not None
+            else TranslationPipeline(source_lang="en", target_lang=target_lang)
         )
 
     # ------------------------------------------------------------------
@@ -217,23 +219,27 @@ class BookTranslator:
     def _load_registries(self) -> None:
         """Load character, place and dynamic-glossary registries."""
         if self.characters_path.exists():
-            with open(self.characters_path, "r", encoding="utf-8") as f:
+            with open(self.characters_path, encoding="utf-8") as f:
                 self.characters = json.load(f).get("characters", [])
 
         if self.places_path.exists():
-            with open(self.places_path, "r", encoding="utf-8") as f:
+            with open(self.places_path, encoding="utf-8") as f:
                 self.places = json.load(f).get("places", [])
 
         if self.dynamic_glossary_path.exists():
-            with open(self.dynamic_glossary_path, "r", encoding="utf-8") as f:
+            with open(self.dynamic_glossary_path, encoding="utf-8") as f:
                 self.dynamic_glossary = json.load(f).get("terms", [])
 
     def _load_manifest(self) -> None:
         """Load translation manifest."""
         if self.manifest_path.exists():
-            with open(self.manifest_path, "r", encoding="utf-8") as f:
+            with open(self.manifest_path, encoding="utf-8") as f:
                 data = json.load(f)
-                self.manifest = [ChapterManifest(**m) for m in data]
+                if isinstance(data, dict):
+                    data = data.get("chapters", [])
+                self.manifest = [
+                    ChapterManifest(**entry) for entry in data if isinstance(entry, dict)
+                ]
 
     def _save_registries(self) -> None:
         """Persist all registries, including the dynamic glossary."""
@@ -284,9 +290,9 @@ class BookTranslator:
     def _build_brief(
         self,
         source_text: str,
-        domain_hint: Optional[str] = None,
-        previous_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        domain_hint: str | None = None,
+        previous_context: str | None = None,
+    ) -> dict[str, Any]:
         """Build a brief via ``TranslationPipeline.build_brief``.
 
         Falls back to a deterministic local brief only when that method is
@@ -302,7 +308,7 @@ class BookTranslator:
             return result if isinstance(result, dict) else (_to_dict(result) or {})
 
         # --- fallback (Task A not yet present) ---
-        analysis: Optional[Dict[str, Any]] = None
+        analysis: dict[str, Any] | None = None
         analyzer = getattr(self.pipeline, "analyze", None)
         if callable(analyzer):
             try:
@@ -323,12 +329,12 @@ class BookTranslator:
                 "code_blocks": list(_extract_placeholders(source_text).keys()),
             }
 
-        glossary_terms: List[Dict[str, Any]] = []
+        glossary_terms: list[dict[str, Any]] = []
         glossary = getattr(self.pipeline, "glossary", None)
         get_terms = getattr(glossary, "get_relevant_terms", None)
         if callable(get_terms):
             try:
-                terms = cast(List[Any], get_terms(source_text, domain_hint or "literary")) or []
+                terms = cast(list[Any], get_terms(source_text, domain_hint or "literary")) or []
                 for term in terms:
                     as_dict = _to_dict(term) or {}
                     if as_dict:
@@ -359,7 +365,7 @@ class BookTranslator:
             "previous_context": previous_context,
         }
 
-    def _validate(self, host_translation: str, brief: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate(self, host_translation: str, brief: dict[str, Any]) -> dict[str, Any]:
         """Validate via ``TranslationPipeline.validate`` with a safe fallback."""
         validator = getattr(self.pipeline, "validate", None)
         if callable(validator):
@@ -369,7 +375,7 @@ class BookTranslator:
             return _to_dict(result) or {"passed": False, "issues": [], "score": 0}
 
         # --- fallback: placeholder integrity check ---
-        issues: List[Dict[str, str]] = []
+        issues: list[dict[str, str]] = []
         placeholder_map = brief.get("placeholder_map", {}) or {}
         for token in placeholder_map:
             if token not in (host_translation or ""):
@@ -393,14 +399,12 @@ class BookTranslator:
     def reconstruct_book(
         self,
         structure: BookStructure,
-        translations: Dict[str, str],
+        translations: dict[str, str],
         output_path: str,
     ) -> None:
         """Reconstruct a book with translated segments."""
         handler = get_handler(output_path)
-        handler.reconstruct(
-            structure, translations, output_path, language=self.target_lang
-        )
+        handler.reconstruct(structure, translations, output_path, language=self.target_lang)
 
     # ------------------------------------------------------------------
     # Two-phase chapter workflow
@@ -413,13 +417,13 @@ class BookTranslator:
 
     def prepare_chapter(
         self,
-        source_path: Optional[str] = None,
-        chapter_id: Optional[Any] = None,
-        source_text: Optional[str] = None,
-        domain_hint: Optional[str] = "literary",
-        previous_context: Optional[str] = None,
-        output_dir: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        source_path: str | None = None,
+        chapter_id: Any | None = None,
+        source_text: str | None = None,
+        domain_hint: str | None = "literary",
+        previous_context: str | None = None,
+        output_dir: str | None = None,
+    ) -> dict[str, Any]:
         """Build and persist a translation brief for one chapter.
 
         ``previous_context`` (chapter 2+) is forwarded verbatim to
@@ -451,9 +455,7 @@ class BookTranslator:
             "previous_context": previous_context,
             "brief": _json_safe(brief),
         }
-        brief_path.write_text(
-            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        brief_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
 
         numeric_chapter: Any = chapter_id
         match = re.search(r"(\d+)", str(chapter_id))
@@ -489,16 +491,15 @@ class BookTranslator:
         self,
         chapter_id: Any,
         host_translation: str,
-        output_dir: Optional[str] = None,
-        output_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        output_dir: str | None = None,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
         """Validate ``host_translation`` against a prepared brief and write it."""
         base = Path(output_dir) if output_dir else self.output_dir
         brief_path = base / "briefs" / f"chapter_{_chapter_slug(chapter_id)}.brief.json"
         if not brief_path.exists():
             raise FileNotFoundError(
-                f"No prepared brief for chapter {chapter_id}: {brief_path}. "
-                "Run --prepare first."
+                f"No prepared brief for chapter {chapter_id}: {brief_path}. " "Run --prepare first."
             )
 
         record = json.loads(brief_path.read_text(encoding="utf-8"))
@@ -508,7 +509,11 @@ class BookTranslator:
         validation = self._validate(host_translation or "", brief)
         passed = bool(validation.get("passed", False)) if isinstance(validation, dict) else False
 
-        target = Path(output_path) if output_path else base / "chapters" / f"chapter_{_chapter_slug(chapter_id)}.ar.txt"
+        target = (
+            Path(output_path)
+            if output_path
+            else base / "chapters" / f"chapter_{_chapter_slug(chapter_id)}.ar.txt"
+        )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(host_translation or "", encoding="utf-8")
 
@@ -532,9 +537,11 @@ class BookTranslator:
                 output_path=str(target),
                 checksum=record.get("checksum", ""),
                 status="completed" if passed else "reviewed",
-                pipeline_id=record.get("brief", {}).get("pipeline_id")
-                if isinstance(record.get("brief"), dict)
-                else None,
+                pipeline_id=(
+                    record.get("brief", {}).get("pipeline_id")
+                    if isinstance(record.get("brief"), dict)
+                    else None
+                ),
                 judge_score=judge_score,
             )
         )
@@ -557,10 +564,10 @@ class BookTranslator:
         self,
         chapter_num: Any,
         translation: str,
-        source_text: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        source_text: str | None = None,
+    ) -> dict[str, Any]:
         """Compare a translation with the registries and return REAL findings."""
-        findings: List[Dict[str, Any]] = []
+        findings: list[dict[str, Any]] = []
 
         # --- renamed characters ---
         for char in self.characters:
@@ -587,8 +594,7 @@ class BookTranslator:
                 continue
             source_names = [char.get("name", "")] + list(char.get("aliases") or [])
             mentioned = bool(
-                source_text
-                and any(n and n.lower() in source_text.lower() for n in source_names)
+                source_text and any(n and n.lower() in source_text.lower() for n in source_names)
             )
             if mentioned and not any(a and a in translation for a in approved):
                 findings.append(
@@ -701,17 +707,38 @@ class BookTranslator:
         chapter_num: Any,
         translation: str,
         source_text: str,
-        glossary_terms: Optional[List[Any]] = None,
-    ) -> Dict[str, int]:
+        glossary_terms: list[Any] | None = None,
+    ) -> dict[str, int]:
         """Extract new entities and glossary terms; persist all registries."""
         chars_added = 0
         places_added = 0
         terms_added = 0
 
         stop_words = {
-            "The", "This", "That", "Chapter", "He", "She", "They", "It",
-            "In", "At", "To", "And", "But", "For", "His", "Her", "Its",
-            "A", "An", "There", "Then", "When", "While", "Once",
+            "The",
+            "This",
+            "That",
+            "Chapter",
+            "He",
+            "She",
+            "They",
+            "It",
+            "In",
+            "At",
+            "To",
+            "And",
+            "But",
+            "For",
+            "His",
+            "Her",
+            "Its",
+            "A",
+            "An",
+            "There",
+            "Then",
+            "When",
+            "While",
+            "Once",
         }
         known_chars = {c.get("name") for c in self.characters}
         for name in re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b", source_text or ""):
@@ -754,10 +781,7 @@ class BookTranslator:
         for raw_term in glossary_terms or []:
             term = raw_term if isinstance(raw_term, dict) else (_to_dict(raw_term) or {})
             source = (
-                term.get("source")
-                or term.get("en")
-                or term.get("term")
-                or term.get("source_term")
+                term.get("source") or term.get("en") or term.get("term") or term.get("source_term")
             )
             target = (
                 term.get("target")
@@ -805,9 +829,9 @@ class BookTranslator:
         self,
         chapter_num: int,
         source_path: str,
-        output_path: Optional[str] = None,
-        previous_context: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        output_path: str | None = None,
+        previous_context: str | None = None,
+    ) -> dict[str, Any]:
         """Translate a single chapter through the full pipeline.
 
         Never subscripts ``JudgeResult`` directly; no output is fabricated
@@ -822,11 +846,7 @@ class BookTranslator:
 
         checksum = self._checksum(str(source))
         for m in self.manifest:
-            if (
-                m.chapter == chapter_num
-                and m.checksum == checksum
-                and m.status == "completed"
-            ):
+            if m.chapter == chapter_num and m.checksum == checksum and m.status == "completed":
                 # Resume path: return the SAME shape as a fresh run so callers
                 # never hit a KeyError on 'judge_score' / 'approved'.
                 resumed_text = (
@@ -920,15 +940,15 @@ class BookTranslator:
     # ------------------------------------------------------------------
     def translate_book(
         self,
-        chapters: List[str],
-        output_dir: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        chapters: list[str],
+        output_dir: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Translate all chapters of a book sequentially."""
         base = Path(output_dir) if output_dir else self.output_dir
         base.mkdir(parents=True, exist_ok=True)
 
-        results: List[Dict[str, Any]] = []
-        previous_context: Optional[str] = None
+        results: list[dict[str, Any]] = []
+        previous_context: str | None = None
 
         for i, chapter_path in enumerate(chapters, 1):
             chapter_output = str(base / f"chapter_{i:03d}.ar.txt")
@@ -946,12 +966,12 @@ class BookTranslator:
                 f"Score: {result.get('judge_score')}. "
                 f"Approved: {result.get('approved')}. "
                 f"Glossary terms: "
-                f"{json.dumps([g.get('source') for g in self.dynamic_glossary], ensure_ascii=False)}."
+                f"{json.dumps([g.get('source') for g in self.dynamic_glossary], ensure_ascii=False)}."  # noqa: E501
             )
 
         return results
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get overall book translation status."""
         total = len(self.manifest)
         completed = sum(1 for m in self.manifest if m.status == "completed")
@@ -989,8 +1009,7 @@ def main() -> int:
     input_path = Path(args.input)
     if input_path.is_dir():
         chapters = sorted(
-            str(p) for p in input_path.glob("*")
-            if p.suffix.lower() in (".txt", ".md", ".epub")
+            str(p) for p in input_path.glob("*") if p.suffix.lower() in (".txt", ".md", ".epub")
         )
     else:
         chapters = [str(input_path)]

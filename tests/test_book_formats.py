@@ -18,8 +18,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import src.book_formats as bf
-from src.book_formats import (
+import src.book_formats as bf  # noqa: E402
+from src.book_formats import (  # noqa: E402
     BookSegment,
     BookStructure,
     DOCXHandler,
@@ -178,9 +178,7 @@ def test_epub_reconstruct_keeps_spine_and_language(monkeypatch, tmp_path):
         BookSegment(id="s2", text="three", chapter=2),
     ]
     out = tmp_path / "book.epub"
-    EPUBHandler().reconstruct(
-        structure, {"s1": "اثنان"}, str(out), language="ar"
-    )
+    EPUBHandler().reconstruct(structure, {"s1": "اثنان"}, str(out), language="ar")
 
     book = captured["book"]
     assert book.language == "ar"
@@ -202,7 +200,10 @@ def test_epub_reconstruct_keeps_spine_and_language(monkeypatch, tmp_path):
         (lambda: EPUBHandler().parse("x.epub"), "pip install ebooklib"),
         (lambda: EPUBHandler().reconstruct(BookStructure(), {}, "x.epub"), "pip install ebooklib"),
         (lambda: DOCXHandler().parse("x.docx"), "pip install python-docx"),
-        (lambda: DOCXHandler().reconstruct(BookStructure(), {}, "x.docx"), "pip install python-docx"),
+        (
+            lambda: DOCXHandler().reconstruct(BookStructure(), {}, "x.docx"),
+            "pip install python-docx",
+        ),
         (lambda: PDFHandler().parse("x.pdf"), "pip install pypdf"),
     ],
 )
